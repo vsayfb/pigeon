@@ -1,7 +1,9 @@
 #include "capture/capture.h"
 
 #include <pcap/pcap.h>
+#include <signal.h>
 #include <stdio.h>
+#include <string.h>
 
 /* Context handed to libpcap: the caller's callback and its user pointer. */
 struct trampoline {
@@ -9,12 +11,37 @@ struct trampoline {
     void *user;
 };
 
+/* Handle of the running capture, or NULL. Read by the signal handler. */
+static pcap_t *volatile active_handle;
+
 /* libpcap handler; forwards each packet to the caller's callback. */
 static void on_pcap_packet(u_char *arg, const struct pcap_pkthdr *hdr,
                            const u_char *bytes) {
     struct trampoline *t = (struct trampoline *)arg;
 
     t->cb(bytes, hdr->caplen, hdr->len, t->user);
+}
+
+/* Signal handler for SIGINT/SIGTERM; makes pcap_loop() return. */
+static void on_stop_signal(int signo) {
+    (void)signo;
+
+    pcap_t *handle = active_handle;
+
+    if (handle != NULL) {
+        pcap_breakloop(handle);
+    }
+}
+
+/* Installs on_stop_signal for `signo`, saving the previous action in `old`. */
+static int install_stop_handler(int signo, struct sigaction *old) {
+    struct sigaction sa;
+
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = on_stop_signal;
+    sigemptyset(&sa.sa_mask);
+
+    return sigaction(signo, &sa, old);
 }
 
 int capture_run_live(const char *ifname, capture_cb cb, void *user) {
@@ -29,9 +56,37 @@ int capture_run_live(const char *ifname, capture_cb cb, void *user) {
         return -1;
     }
 
+    struct sigaction old_int;
+    struct sigaction old_term;
+
+    /* Set before installing handlers so no signal can arrive unseen. */
+    active_handle = handle;
+
+    if (install_stop_handler(SIGINT, &old_int) == -1) {
+        perror("sigaction(SIGINT)");
+        active_handle = NULL;
+        pcap_close(handle);
+
+        return -1;
+    }
+
+    if (install_stop_handler(SIGTERM, &old_term) == -1) {
+        perror("sigaction(SIGTERM)");
+        sigaction(SIGINT, &old_int, NULL);
+        active_handle = NULL;
+        pcap_close(handle);
+
+        return -1;
+    }
+
     struct trampoline t = { .cb = cb, .user = user };
 
+    /* Returns PCAP_ERROR_BREAK when stopped by on_stop_signal(). */
     const int rc = pcap_loop(handle, -1, on_pcap_packet, (u_char *)&t);
+
+    sigaction(SIGINT, &old_int, NULL);
+    sigaction(SIGTERM, &old_term, NULL);
+    active_handle = NULL;
 
     if (rc == PCAP_ERROR) {
         fprintf(stderr, "pcap_loop: %s\n", pcap_geterr(handle));

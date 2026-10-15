@@ -32,5 +32,9 @@ int main(const int argc, char **argv) {
 
     fprintf(stderr, "pigeon %s capturing on %s\n", PIGEON_VERSION, argv[1]);
 
-    return capture_run_live(argv[1], print_length, &count) == 0 ? 0 : 1;
+    const int rc = capture_run_live(argv[1], print_length, &count);
+
+    fprintf(stderr, "pigeon stopped after %lu packets\n", count);
+
+    return rc == 0 ? 0 : 1;
 }

@@ -19,8 +19,11 @@ typedef void (*capture_cb)(const uint8_t *data, uint32_t caplen,
  * Captures packets on the interface `ifname` and invokes `cb` for each
  * one, blocking until capture ends.
  *
- * Returns 0 when capture ends normally, -1 on error. Errors are
- * reported on stderr.
+ * While running, SIGINT and SIGTERM stop the capture. Their previous
+ * handlers are restored before the function returns.
+ *
+ * Returns 0 when capture ends normally, including a stop by signal, and
+ * -1 on error. Errors are reported on stderr.
  */
 int capture_run_live(const char *ifname, capture_cb cb, void *user);
 
