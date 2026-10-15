@@ -27,4 +27,11 @@ typedef void (*capture_cb)(const uint8_t *data, uint32_t caplen,
  */
 int capture_run_live(const char *ifname, capture_cb cb, void *user);
 
+/*
+ * Reads the pcap savefile at `path` and invokes `cb` for each packet in
+ * file order, returning after the last one. Signal handling and return
+ * values are the same as for capture_run_live().
+ */
+int capture_run_file(const char *path, capture_cb cb, void *user);
+
 #endif

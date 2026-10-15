@@ -44,18 +44,9 @@ static int install_stop_handler(int signo, struct sigaction *old) {
     return sigaction(signo, &sa, old);
 }
 
-int capture_run_live(const char *ifname, capture_cb cb, void *user) {
-    char errbuf[PCAP_ERRBUF_SIZE];
-
-    /* Full-size snapshots, non-promiscuous, 1 s read timeout. */
-    pcap_t *handle = pcap_open_live(ifname, 65535, 0, 1000, errbuf);
-
-    if (handle == NULL) {
-        fprintf(stderr, "pcap_open_live(%s): %s\n", ifname, errbuf);
-
-        return -1;
-    }
-
+/* Delivers packets from `handle` to `cb` until the source ends, then
+ * closes the handle. Returns 0 on normal end, -1 on error. */
+static int run_loop(pcap_t *handle, capture_cb cb, void *user) {
     struct sigaction old_int;
     struct sigaction old_term;
 
@@ -95,4 +86,34 @@ int capture_run_live(const char *ifname, capture_cb cb, void *user) {
     pcap_close(handle);
 
     return rc == PCAP_ERROR ? -1 : 0;
+}
+
+
+int capture_run_live(const char *ifname, capture_cb cb, void *user) {
+    char errbuf[PCAP_ERRBUF_SIZE];
+
+    /* Full-size snapshots, non-promiscuous, 1 s read timeout. */
+    pcap_t *handle = pcap_open_live(ifname, 65535, 0, 1000, errbuf);
+
+    if (handle == NULL) {
+        fprintf(stderr, "pcap_open_live(%s): %s\n", ifname, errbuf);
+
+        return -1;
+    }
+
+    return run_loop(handle, cb, user);
+}
+
+int capture_run_file(const char *path, capture_cb cb, void *user) {
+    char errbuf[PCAP_ERRBUF_SIZE];
+
+    pcap_t *handle = pcap_open_offline(path, errbuf);
+
+    if (handle == NULL) {
+        fprintf(stderr, "pcap_open_offline(%s): %s\n", path, errbuf);
+
+        return -1;
+    }
+
+    return run_loop(handle, cb, user);
 }
