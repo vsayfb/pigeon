@@ -12,7 +12,18 @@
 #define ETHERTYPE_VLAN 0x8100
 #define ETHERTYPE_IPV6 0x86DD
 
-/* Decoded Ethernet II header and the bytes that follow it. */
+
+/*
+Decoded Ethernet II header and the bytes that follow it.
+
+Ethernet II frame (14-byte header)
+┌────────────┬────────────┬──────────┬─────────┐
+│ Dst MAC 6B │ Src MAC 6B │ Type 2B  │ Payload │
+└────────────┴────────────┴──────────┴─────────┘
+0            6            12         14
+↓            ↓            ↓          ↓
+frame        frame+6      frame+12   frame+14
+*/
 struct eth_view {
     uint8_t dst[ETH_ADDR_LEN];
     uint8_t src[ETH_ADDR_LEN];

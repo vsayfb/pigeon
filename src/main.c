@@ -4,6 +4,7 @@
 
 #include "capture/capture.h"
 #include "proto/ethernet.h"
+#include "proto/ipv4.h"
 
 #ifndef PIGEON_VERSION
 #define PIGEON_VERSION "dev"
@@ -34,6 +35,22 @@ static void print_frame(const uint8_t *data, const uint32_t caplen,
     print_mac(eth.dst);
     printf(" type=0x%04x caplen=%u wirelen=%u\n",
            eth.ethertype, caplen, wirelen);
+
+    if (eth.ethertype == ETHERTYPE_IPV4) {
+        struct ipv4_view ip;
+        char src[IPV4_STR_LEN];
+        char dst[IPV4_STR_LEN];
+
+        if (ipv4_parse(eth.payload, eth.payload_len, &ip) == -1) {
+            printf("    IPv4 malformed\n");
+
+            return;
+        }
+
+        printf("    IPv4 %s > %s proto=%u hdr=%u total=%u payload=%zu\n",
+               ipv4_addr_str(ip.src, src), ipv4_addr_str(ip.dst, dst),
+               ip.protocol, ip.header_len, ip.total_len, ip.payload_len);
+    }
 }
 
 int main(const int argc, char **argv) {

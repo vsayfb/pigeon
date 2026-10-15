@@ -8,4 +8,16 @@ static inline uint16_t be16(const uint8_t *p) {
     return (uint16_t)((p[0] << 8) | p[1]);
 }
 
+/*
+ * Reads a big-endian (network byte order) 32-bit value from `p`.
+ *
+ * Each byte is cast to uint32_t *before* shifting. Without the cast, a byte
+ * such as 0xC0 is promoted to a signed int and `0xC0 << 24` overflows it,
+ * which is undefined behavior.
+ */
+static inline uint32_t be32(const uint8_t *p) {
+    return ((uint32_t)p[0] << 24) | ((uint32_t)p[1] << 16) |
+           ((uint32_t)p[2] << 8) | (uint32_t)p[3];
+}
+
 #endif
