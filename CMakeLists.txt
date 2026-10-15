@@ -17,19 +17,19 @@ include_directories(src)
 
 find_library(PCAP_LIBRARY pcap REQUIRED)
 
-add_executable(pigeon
-        src/main.c
+add_library(pigeon_core STATIC
         src/capture/capture.c
 )
+target_link_libraries(pigeon_core PUBLIC ${PCAP_LIBRARY})
 
+add_executable(pigeon src/main.c)
 target_compile_definitions(pigeon PRIVATE PIGEON_VERSION="0.0.1")
-target_link_libraries(pigeon PRIVATE ${PCAP_LIBRARY})
+target_link_libraries(pigeon PRIVATE pigeon_core)
 
 enable_testing()
-add_executable(test_capture_file
-        tests/unit/test_capture_file.c
-        src/capture/capture.c)
+
+add_executable(test_capture_file tests/unit/test_capture_file.c)
 target_compile_definitions(test_capture_file PRIVATE
         PIGEON_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
-target_link_libraries(test_capture_file PRIVATE ${PCAP_LIBRARY})
+target_link_libraries(test_capture_file PRIVATE pigeon_core)
 add_test(NAME capture_file COMMAND test_capture_file)
