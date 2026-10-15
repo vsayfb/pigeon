@@ -19,10 +19,14 @@ find_library(PCAP_LIBRARY pcap REQUIRED)
 
 add_library(pigeon_core STATIC
         src/capture/capture.c
+        src/proto/ethernet.c
 )
 target_link_libraries(pigeon_core PUBLIC ${PCAP_LIBRARY})
 
-add_executable(pigeon src/main.c)
+add_executable(pigeon src/main.c
+        src/proto/bytes.h
+        src/proto/ethernet.c
+)
 target_compile_definitions(pigeon PRIVATE PIGEON_VERSION="0.0.1")
 target_link_libraries(pigeon PRIVATE pigeon_core)
 
@@ -33,3 +37,9 @@ target_compile_definitions(test_capture_file PRIVATE
         PIGEON_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
 target_link_libraries(test_capture_file PRIVATE pigeon_core)
 add_test(NAME capture_file COMMAND test_capture_file)
+
+add_executable(test_ethernet tests/unit/test_ethernet.c)
+target_compile_definitions(test_ethernet PRIVATE
+        PIGEON_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
+target_link_libraries(test_ethernet PRIVATE pigeon_core)
+add_test(NAME ethernet COMMAND test_ethernet)

@@ -3,21 +3,37 @@
 #include <string.h>
 
 #include "capture/capture.h"
+#include "proto/ethernet.h"
 
 #ifndef PIGEON_VERSION
 #define PIGEON_VERSION "dev"
 #endif
 
-/* Prints a running count and the captured/wire length of each packet. */
-static void print_length(const uint8_t *data, const uint32_t caplen,
-                         const uint32_t wirelen, void *user) {
-    (void)data;
+static void print_mac(const uint8_t mac[ETH_ADDR_LEN]) {
+    printf("%02x:%02x:%02x:%02x:%02x:%02x",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
 
+/* Prints the Ethernet addresses and type of each frame. */
+static void print_frame(const uint8_t *data, const uint32_t caplen,
+                        const uint32_t wirelen, void *user) {
     unsigned long *count = user;
+    struct eth_view eth;
 
     (*count)++;
 
-    printf("#%lu caplen=%u wirelen=%u\n", *count, caplen, wirelen);
+    if (eth_parse(data, caplen, &eth) == -1) {
+        printf("#%lu truncated frame, %u bytes\n", *count, caplen);
+
+        return;
+    }
+
+    printf("#%lu ", *count);
+    print_mac(eth.src);
+    printf(" > ");
+    print_mac(eth.dst);
+    printf(" type=0x%04x caplen=%u wirelen=%u\n",
+           eth.ethertype, caplen, wirelen);
 }
 
 int main(const int argc, char **argv) {
@@ -35,10 +51,10 @@ int main(const int argc, char **argv) {
     int rc;
 
     if (offline) {
-        rc = capture_run_file(argv[2], print_length, &count);
+        rc = capture_run_file(argv[2], print_frame, &count);
     } else {
         fprintf(stderr, "pigeon %s capturing on %s\n", PIGEON_VERSION, argv[1]);
-        rc = capture_run_live(argv[1], print_length, &count);
+        rc = capture_run_live(argv[1], print_frame, &count);
     }
 
     fprintf(stderr, "pigeon stopped after %lu packets\n", count);

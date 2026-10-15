@@ -47,6 +47,17 @@ static int install_stop_handler(int signo, struct sigaction *old) {
 /* Delivers packets from `handle` to `cb` until the source ends, then
  * closes the handle. Returns 0 on normal end, -1 on error. */
 static int run_loop(pcap_t *handle, capture_cb cb, void *user) {
+
+    const int linktype = pcap_datalink(handle);
+
+    if (linktype != DLT_EN10MB) {
+        fprintf(stderr, "unsupported link type %d: only Ethernet is handled\n",
+                linktype);
+        pcap_close(handle);
+
+        return -1;
+    }
+
     struct sigaction old_int;
     struct sigaction old_term;
 

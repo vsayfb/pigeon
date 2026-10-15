@@ -6,7 +6,7 @@
 /*
  * Per-packet callback.
  *
- * data     First byte of the captured frame (link-layer header).
+ * data     First byte of the captured frame (its Ethernet header).
  *          Valid only until the callback returns; copy what you keep.
  * caplen   Number of bytes actually captured and readable at data.
  * wirelen  Original length of the frame on the wire (>= caplen).
@@ -23,7 +23,8 @@ typedef void (*capture_cb)(const uint8_t *data, uint32_t caplen,
  * handlers are restored before the function returns.
  *
  * Returns 0 when capture ends normally, including a stop by signal, and
- * -1 on error. Errors are reported on stderr.
+ * -1 on error, including when the source's link type is not Ethernet.
+ * Errors are reported on stderr.
  */
 int capture_run_live(const char *ifname, capture_cb cb, void *user);
 

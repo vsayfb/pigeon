@@ -1,4 +1,6 @@
 #include <stdint.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 #include "../t.h"
 #include "capture/capture.h"
@@ -25,6 +27,7 @@ static void record(const uint8_t *data, uint32_t caplen, uint32_t wirelen,
     r->count++;
 }
 
+
 static void test_replays_every_packet_in_order(void) {
     static const uint32_t expected[] = { 54, 54, 54, 92, 92 };
     struct recorded r = { 0 };
@@ -48,9 +51,32 @@ static void test_missing_file_fails(void) {
     CHECK(r.count == 0);
 }
 
+static void test_non_ethernet_link_type_fails(void) {
+    /* Savefile header only: version 2.4, snaplen 65535, link type 101 (raw IP). */
+    static const uint8_t header[24] = {
+        0xd4, 0xc3, 0xb2, 0xa1, 0x02, 0x00, 0x04, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0xff, 0xff, 0x00, 0x00, 0x65, 0x00, 0x00, 0x00,
+    };
+    char path[] = "/tmp/pigeon_linktype_XXXXXX";
+    struct recorded r = { 0 };
+
+    const int fd = mkstemp(path);
+    CHECK(fd != -1);
+    CHECK(write(fd, header, sizeof header) == (ssize_t)sizeof header);
+    close(fd);
+
+    CHECK(capture_run_file(path, record, &r) == -1);
+    CHECK(r.count == 0);
+
+    unlink(path);
+}
+
 int main(void) {
     test_replays_every_packet_in_order();
     test_missing_file_fails();
+    test_non_ethernet_link_type_fails();
+
     printf("capture_file: ok\n");
 
     return 0;
