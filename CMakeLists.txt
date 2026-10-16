@@ -6,10 +6,13 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 add_compile_options(-Wall -Wextra -Werror)
 
-# Catches memory bugs and undefined behavior while we develop.
+# Memory errors and undefined behavior abort the program, so a test run that
+# hits either one fails. Without -fno-sanitize-recover, UBSan only prints a
+# report and the run continues.
 option(PIGEON_SANITIZE "Build with ASan + UBSan" ON)
 if(PIGEON_SANITIZE)
-    add_compile_options(-fsanitize=address,undefined -g)
+    add_compile_options(-fsanitize=address,undefined
+                        -fno-sanitize-recover=undefined -g)
     add_link_options(-fsanitize=address,undefined)
 endif()
 
