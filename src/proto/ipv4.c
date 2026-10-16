@@ -9,7 +9,7 @@ int ipv4_parse(const uint8_t *data, const size_t len, struct ipv4_view *out) {
         return -1;
     }
 
-    /* Byte 0 packs two 4-bit fields: version in the high half, IHL in the low. */
+    /* Byte 0: version in the high 4 bits, IHL (in 4-byte words) in the low 4. */
     const unsigned version = data[0] >> 4;
     const size_t header_len = (size_t)(data[0] & 0x0F) * 4;
 
@@ -27,12 +27,15 @@ int ipv4_parse(const uint8_t *data, const size_t len, struct ipv4_view *out) {
         return -1;
     }
 
-    /* Trust neither number alone: stop at whichever ends first. */
+    /* The payload ends at total_len, or at the end of the buffer if sooner. */
     const size_t end = total_len < len ? total_len : len;
 
     out->header_len = (uint8_t)header_len;
     out->protocol = data[9];
     out->total_len = total_len;
+
+    /* Bytes 6-7: 3 flag bits, then a 13-bit offset in 8-byte units. */
+    out->frag_offset = (uint16_t)((be16(data + 6) & 0x1FFF) * 8);
     out->src = be32(data + 12);
     out->dst = be32(data + 16);
     out->payload = data + header_len;

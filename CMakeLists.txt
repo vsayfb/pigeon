@@ -21,6 +21,7 @@ add_library(pigeon_core STATIC
         src/capture/capture.c
         src/proto/ethernet.c
         src/proto/ipv4.c
+        src/proto/transport.c
 )
 target_link_libraries(pigeon_core PUBLIC ${PCAP_LIBRARY})
 
@@ -50,3 +51,9 @@ target_compile_definitions(test_ipv4 PRIVATE
         PIGEON_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
 target_link_libraries(test_ipv4 PRIVATE pigeon_core)
 add_test(NAME ipv4 COMMAND test_ipv4)
+
+add_executable(test_transport tests/unit/test_transport.c)
+target_compile_definitions(test_transport PRIVATE
+        PIGEON_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
+target_link_libraries(test_transport PRIVATE pigeon_core)
+add_test(NAME transport COMMAND test_transport)

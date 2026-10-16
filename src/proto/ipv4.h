@@ -28,35 +28,40 @@ struct ipv4_view {
     uint8_t header_len;         /* in bytes: IHL * 4, between 20 and 60 */
     uint8_t protocol;           /* IP_PROTO_* */
     uint16_t total_len;         /* header + payload, as the header claims */
+    uint16_t frag_offset;       /* bytes into the original datagram */
     uint32_t src;               /* host byte order: 192.0.2.10 is 0xC000020A */
     uint32_t dst;
     const uint8_t *payload;     /* points into the buffer passed to ipv4_parse() */
-    size_t payload_len;         /* bytes you may read at `payload` */
+    size_t payload_len;         /* readable bytes at `payload` */
 };
 
 /*
  * Decodes the IPv4 header at the start of `data` (`len` readable bytes) into
- * `out`. `out->payload` points into `data`, so it is only valid as long as
+ * `out`. `out->payload` points into `data` and is valid only as long as
  * `data` is.
  *
- * `payload_len` is the number of payload bytes that are both present in the
- * buffer and inside the packet the header describes: bytes past `total_len`
- * (Ethernet padding) are excluded, and so are bytes cut off by a short
- * capture. `total_len` still holds what the header claims, so
- * `total_len - header_len` is the payload size on the wire.
+ * `payload_len` counts the payload bytes that are present in the buffer and
+ * within `total_len`, so Ethernet padding and bytes cut off by a short
+ * capture are excluded. `total_len - header_len` is the payload size on the
+ * wire.
  *
- * The header checksum is not verified: NICs often fill it in after the
- * capture point, so outgoing packets would look corrupt.
+ * `frag_offset` is the offset of this packet's data within the original
+ * datagram: 0 for unfragmented packets and first fragments, non-zero for
+ * later fragments, whose payload is not a transport header. Fragments are
+ * not reassembled.
  *
- * Returns 0 on success, -1 if the input is too short, is not version 4, has
- * an IHL below 5, has a header longer than `len`, or claims a `total_len`
- * smaller than its own header. `out` is untouched on failure.
+ * The header checksum is not verified; NICs often fill it in after the
+ * capture point, so outgoing packets would fail the check.
+ *
+ * Returns 0 on success. Returns -1, leaving `out` untouched, if the input is
+ * shorter than the minimum header, the version is not 4, the IHL is below 5
+ * or the header exceeds `len`, or `total_len` is smaller than the header.
  */
 int ipv4_parse(const uint8_t *data, size_t len, struct ipv4_view *out);
 
 /*
- * Writes `addr` (host byte order) into `buf` as dotted decimal and returns
- * `buf`, so the call can sit inside a printf argument list.
+ * Formats `addr` (host byte order) as dotted decimal into `buf` and returns
+ * `buf`.
  */
 const char *ipv4_addr_str(uint32_t addr, char buf[IPV4_STR_LEN]);
 

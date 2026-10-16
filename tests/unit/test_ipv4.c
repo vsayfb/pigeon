@@ -42,6 +42,7 @@ static void test_parses_ihl_5(void) {
     CHECK(ip.header_len == 20);
     CHECK(ip.protocol == IP_PROTO_TCP);
     CHECK(ip.total_len == 24);
+    CHECK(ip.frag_offset == 0);
     CHECK(ip.src == CLIENT_IP);
     CHECK(ip.dst == SERVER_IP);
     CHECK(ip.payload == pkt + 20);
@@ -109,10 +110,10 @@ static void test_header_longer_than_buffer_is_rejected(void) {
     struct ipv4_view ip;
 
     make_packet(pkt);
-    pkt[0] = 0x46;                          /* claims a 24-byte header... */
+    pkt[0] = 0x46;                          /* IHL 6: 24-byte header */
 
-    CHECK(ipv4_parse(pkt, 23, &ip) == -1);  /* ...but only 23 bytes exist */
-    CHECK(ipv4_parse(pkt, 24, &ip) == 0);   /* exactly enough is fine */
+    CHECK(ipv4_parse(pkt, 23, &ip) == -1);  /* header incomplete */
+    CHECK(ipv4_parse(pkt, 24, &ip) == 0);   /* header complete */
 }
 
 static void test_total_len_smaller_than_header_is_rejected(void) {
@@ -135,24 +136,50 @@ static void test_total_len_larger_than_caplen_is_clamped(void) {
     struct ipv4_view ip;
 
     make_packet(pkt);
-    pkt[2] = 0x05;                          /* total_len 1500, but only */
-    pkt[3] = 0xDC;                          /* 24 bytes were captured */
+    pkt[2] = 0x05;                          /* total_len 0x05DC = 1500, */
+    pkt[3] = 0xDC;                          /* only 24 bytes present */
 
     CHECK(ipv4_parse(pkt, sizeof pkt, &ip) == 0);
-    CHECK(ip.total_len == 1500);            /* what the header claims */
-    CHECK(ip.payload_len == 4);             /* what we can actually read */
+    CHECK(ip.total_len == 1500);            /* as stated in the header */
+    CHECK(ip.payload_len == 4);             /* readable bytes */
 }
 
 static void test_bytes_past_total_len_are_not_payload(void) {
     uint8_t buf[60];
     struct ipv4_view ip;
 
-    memset(buf, 0, sizeof buf);             /* padding is zeros, like Ethernet's */
+    memset(buf, 0, sizeof buf);             /* zero padding after the packet */
     make_packet(buf);                       /* total_len 24, buffer is 60 */
 
     CHECK(ipv4_parse(buf, sizeof buf, &ip) == 0);
     CHECK(ip.total_len == 24);
     CHECK(ip.payload_len == 4);
+}
+
+static void test_fragment_offset_is_decoded(void) {
+    uint8_t pkt[24];
+    struct ipv4_view ip;
+
+    make_packet(pkt);
+
+    pkt[6] = 0x40;                          /* DF flag, offset 0 */
+    pkt[7] = 0x00;
+    CHECK(ipv4_parse(pkt, sizeof pkt, &ip) == 0);
+    CHECK(ip.frag_offset == 0);
+
+    pkt[6] = 0x20;                          /* MF flag, offset 0: first fragment */
+    CHECK(ipv4_parse(pkt, sizeof pkt, &ip) == 0);
+    CHECK(ip.frag_offset == 0);
+
+    pkt[6] = 0x00;                          /* no flags, offset 185 * 8 */
+    pkt[7] = 0xB9;
+    CHECK(ipv4_parse(pkt, sizeof pkt, &ip) == 0);
+    CHECK(ip.frag_offset == 1480);
+
+    pkt[6] = 0x3F;                          /* MF + largest offset, 8191 * 8 */
+    pkt[7] = 0xFF;
+    CHECK(ipv4_parse(pkt, sizeof pkt, &ip) == 0);
+    CHECK(ip.frag_offset == 65528);
 }
 
 static void test_failed_parse_leaves_out_untouched(void) {
@@ -223,6 +250,7 @@ int main(void) {
     test_total_len_smaller_than_header_is_rejected();
     test_total_len_larger_than_caplen_is_clamped();
     test_bytes_past_total_len_are_not_payload();
+    test_fragment_offset_is_decoded();
     test_failed_parse_leaves_out_untouched();
     test_address_to_string();
     test_parses_every_fixture_frame();

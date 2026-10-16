@@ -5,6 +5,7 @@
 #include "capture/capture.h"
 #include "proto/ethernet.h"
 #include "proto/ipv4.h"
+#include "proto/transport.h"
 
 #ifndef PIGEON_VERSION
 #define PIGEON_VERSION "dev"
@@ -50,6 +51,29 @@ static void print_frame(const uint8_t *data, const uint32_t caplen,
         printf("    IPv4 %s > %s proto=%u hdr=%u total=%u payload=%zu\n",
                ipv4_addr_str(ip.src, src), ipv4_addr_str(ip.dst, dst),
                ip.protocol, ip.header_len, ip.total_len, ip.payload_len);
+
+        if (ip.frag_offset != 0) {
+            printf("    fragment at offset %u, no transport header\n",
+                   ip.frag_offset);
+        } else if (ip.protocol == IP_PROTO_TCP) {
+            struct tcp_view tcp;
+
+            if (tcp_parse(&ip, &tcp) == -1) {
+                printf("    TCP malformed\n");
+            } else {
+                printf("    TCP %u > %u hdr=%u payload=%zu\n", tcp.src_port,
+                       tcp.dst_port, tcp.header_len, tcp.payload_wire_len);
+            }
+        } else if (ip.protocol == IP_PROTO_UDP) {
+            struct udp_view udp;
+
+            if (udp_parse(&ip, &udp) == -1) {
+                printf("    UDP malformed\n");
+            } else {
+                printf("    UDP %u > %u payload=%zu\n", udp.src_port,
+                       udp.dst_port, udp.payload_wire_len);
+            }
+        }
     }
 }
 
