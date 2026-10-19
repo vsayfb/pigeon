@@ -4,7 +4,7 @@ A network watcher daemon written in C. Work in progress.
 
 
 Build and run the tests with CMake, a C compiler, libpcap headers,
-and SQLite development headers, version 3.24.0 or newer:
+SQLite development headers (version 3.24.0 or newer), and ncurses development headers:
 
 ```sh
 cmake -S . -B build
@@ -72,8 +72,65 @@ tracking. The local-IP option is only accepted with `-r`; live capture uses the
 discovered address. Replay maintenance follows packet timestamps, without
 waiting for wall-clock time.
 
-The build requires `libsqlite3-dev` and `libpcap-dev` on Debian/Ubuntu.
+The build requires `libsqlite3-dev`, `libpcap-dev`, and `libncurses-dev` on Debian/Ubuntu.
 See [docs/SCHEMA.md](docs/SCHEMA.md) for the schema and write semantics.
+
+### Terminal viewer
+
+Run capture and the viewer in separate terminals, using the same database path:
+
+```sh
+sudo ./build/pigeon --db /tmp/pigeon.db
+```
+
+```sh
+./build/pigeon-tui --db /tmp/pigeon.db
+```
+
+The viewer needs read access to the database and its SQLite sidecar files. It
+opens an existing schema-version-3 database read-only, never creates or migrates
+it, and does not require capture privileges. Quitting the viewer leaves capture
+running. `--once` prints a snapshot without requiring an interactive terminal.
+
+The screen contains Traffic overview, Live traffic, Top Conversations, and New
+endpoints. Wide terminals show all panels; smaller terminals show the overview
+and one selectable list. The minimum size is 60 columns by 16 rows; all panels
+fit at 110 columns by 26 rows. Lists show at most 200 matches.
+
+| Key | Action |
+| --- | --- |
+| Tab / Shift-Tab | Change panel |
+| Arrows, j/k, PgUp/PgDn, Home/End | Select a row |
+| Enter | Show details; Enter/Esc closes |
+| / | Search recorded name or numeric remote IP; Enter applies |
+| Esc | Clear applied search |
+| s | Sort Top Conversations by total, download, or upload |
+| r | Cycle Live traffic window: 30s, 120s, all recorded, 10s |
+| f / v | Cycle protocol / address-family filters |
+| p | Pause automatic refresh |
+| ? | Show help |
+| q / Ctrl-C | Quit viewer |
+
+Refreshes occur once per second. Overview totals and Top Conversations are
+cumulative database counters. Rates estimate changes in those counters between
+viewer samples. Separate download and upload traces hold up to 60 viewer samples
+(fewer in narrow terminals), with the newest at the right. Both use the displayed
+shared scale from zero to the visible peak; `_` marks zero traffic. Each trace
+shows the elapsed time covered by its visible samples, including refresh delays
+or pauses. These count transport
+payload, including retransmissions. They are not interface speeds or stored
+traffic history. Replay files with old timestamps appear in Top Conversations;
+select the all-recorded Live window to see them there too.
+
+Overview is unfiltered. Search and address-family filters apply to all lists;
+protocol filtering applies to conversations only. New endpoints groups by
+remote IP across ports and local addresses, ordered by earliest recorded
+first-seen time. When an IP has multiple recorded names, it shows a deterministic
+representative name. DNS associations do not establish service ownership.
+
+The database has no collector heartbeat, so packet age cannot distinguish an
+idle collector from a stopped one. Read failures leave the previous snapshot
+visible with an error while the viewer retries.
 
 DNS response decoding is implemented independently in `src/dns/dns_parse.[ch]`.
 It extracts IN-class A and AAAA records, follows CNAME chains, and decodes compressed

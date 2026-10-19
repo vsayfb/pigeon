@@ -154,3 +154,22 @@ endif()
 
 add_executable(fuzz_packet tests/fuzz/fuzz_packet.c)
 target_link_libraries(fuzz_packet PRIVATE pigeon_core)
+
+set(CURSES_NEED_NCURSES TRUE)
+find_package(Curses REQUIRED)
+
+add_library(pigeon_tui_data STATIC src/tui/model.c src/proto/address.c)
+target_link_libraries(pigeon_tui_data PUBLIC SQLite::SQLite3)
+
+add_executable(pigeon-tui src/tui/main.c src/tui/screen.c)
+target_include_directories(pigeon-tui PRIVATE ${CURSES_INCLUDE_DIRS})
+target_link_libraries(pigeon-tui PRIVATE pigeon_tui_data ${CURSES_LIBRARIES})
+
+add_executable(test_tui_model tests/unit/test_tui_model.c)
+target_link_libraries(test_tui_model PRIVATE pigeon_tui_data pigeon_core)
+add_test(NAME tui_model COMMAND test_tui_model)
+
+add_executable(test_tui_screen tests/unit/test_tui_screen.c src/tui/screen.c)
+target_include_directories(test_tui_screen PRIVATE ${CURSES_INCLUDE_DIRS})
+target_link_libraries(test_tui_screen PRIVATE pigeon_tui_data ${CURSES_LIBRARIES})
+add_test(NAME tui_screen COMMAND test_tui_screen)
