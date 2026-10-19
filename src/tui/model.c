@@ -14,7 +14,8 @@
     " WHERE (?1='' OR instr(lower(coalesce(remote_name,'')),lower(?1))>0" \
     " OR instr(lower(ip_text(remote_ip)),lower(?1))>0" \
     " OR instr(lower(application),lower(?1))>0)" \
-    " AND (?2=0 OR protocol=?2) AND (?3=0 OR length(remote_ip)=?3)"
+    " AND (?2=0 OR protocol=?2) AND (?3=0 OR length(remote_ip)=?3)" \
+    " AND (?7=0 OR application=?8)"
 
 struct tui_reader {
     sqlite3 *db;
@@ -22,6 +23,7 @@ struct tui_reader {
     sqlite3_stmt *live;
     sqlite3_stmt *top;
     sqlite3_stmt *endpoints;
+    sqlite3_stmt *applications;
 
     double previous_down;
     double previous_up;
@@ -133,7 +135,14 @@ struct tui_reader *tui_reader_open(const char *path, char error[TUI_ERROR_LEN]) 
                             " AND (?2=0 OR length(remote_ip)=?2)"
                             " ORDER BY first_seen DESC,remote_ip LIMIT 200";
 
-    if (sqlite3_prepare_v2(reader->db, overview, -1, &reader->overview, NULL) != SQLITE_OK ||
+    const char *applications = "SELECT application,total(bytes_in),total(bytes_out),"
+                               "count(*),count(DISTINCT remote_ip),max(last_seen)"
+                               " FROM conversations GROUP BY application"
+                               " ORDER BY CASE ?1 WHEN 1 THEN total(bytes_in) WHEN 2 THEN total(bytes_out)"
+                               " ELSE total(bytes_in)+total(bytes_out) END DESC,application LIMIT 200";
+
+    if (sqlite3_prepare_v2(reader->db, applications, -1, &reader->applications, NULL) != SQLITE_OK ||
+        sqlite3_prepare_v2(reader->db, overview, -1, &reader->overview, NULL) != SQLITE_OK ||
         sqlite3_prepare_v2(reader->db, live, -1, &reader->live, NULL) != SQLITE_OK ||
         sqlite3_prepare_v2(reader->db, top, -1, &reader->top, NULL) != SQLITE_OK ||
         sqlite3_prepare_v2(reader->db, endpoints, -1, &reader->endpoints, NULL) != SQLITE_OK) {
@@ -160,6 +169,7 @@ void tui_reader_close(struct tui_reader *reader) {
     sqlite3_finalize(reader->live);
     sqlite3_finalize(reader->top);
     sqlite3_finalize(reader->endpoints);
+    sqlite3_finalize(reader->applications);
     sqlite3_close(reader->db);
     free(reader);
 }
@@ -176,6 +186,44 @@ static int bind_filters(sqlite3_stmt *statement, const struct tui_options *optio
     }
 
     return rc;
+}
+
+static int bind_application(sqlite3_stmt *statement, const struct tui_options *options) {
+    int rc = sqlite3_bind_int(statement, 7, options->application_selected);
+
+    if (rc == SQLITE_OK) {
+        rc = sqlite3_bind_text(statement, 8, options->application, -1, SQLITE_TRANSIENT);
+    }
+
+    return rc;
+}
+
+static int read_applications(sqlite3_stmt *statement, struct tui_snapshot *snapshot) {
+    int rc;
+
+    while ((rc = sqlite3_step(statement)) == SQLITE_ROW) {
+        if (snapshot->application_count == TUI_MAX_ROWS) {
+            return -1;
+        }
+
+        struct tui_application *row = &snapshot->applications[snapshot->application_count++];
+        const char *name = (const char *)sqlite3_column_text(statement, 0);
+        const int length = sqlite3_column_bytes(statement, 0);
+
+        if (name == NULL || length < 0 || (size_t)length >= sizeof row->name ||
+            memchr(name, '\0', (size_t)length) != NULL) {
+            return -1;
+        }
+
+        memcpy(row->name, name, (size_t)length + 1);
+        row->bytes_down = sqlite3_column_double(statement, 1);
+        row->bytes_up = sqlite3_column_double(statement, 2);
+        row->conversations = (uint64_t)sqlite3_column_int64(statement, 3);
+        row->remote_ips = (uint64_t)sqlite3_column_int64(statement, 4);
+        row->last_seen = sqlite3_column_int64(statement, 5);
+    }
+
+    return rc == SQLITE_DONE ? 0 : -1;
 }
 
 static int read_conversations(sqlite3_stmt *statement, struct tui_conversation *rows, size_t *count) {
@@ -224,7 +272,9 @@ static int read_conversations(sqlite3_stmt *statement, struct tui_conversation *
 }
 
 static void reset_statements(struct tui_reader *reader) {
-    sqlite3_stmt *statements[] = { reader->overview, reader->live, reader->top, reader->endpoints };
+    sqlite3_stmt *statements[] = {
+        reader->overview, reader->live, reader->top, reader->endpoints, reader->applications
+    };
 
     for (size_t i = 0; i < sizeof statements / sizeof statements[0]; i++) {
         sqlite3_reset(statements[i]);
@@ -240,6 +290,8 @@ int tui_reader_refresh(struct tui_reader *reader, const struct tui_options *opti
         (options->family != 0 && options->family != 4 && options->family != 6) ||
         options->sort < TUI_SORT_TOTAL || options->sort > TUI_SORT_UPLOAD ||
         memchr(options->search, '\0', sizeof options->search) == NULL ||
+        (options->application_selected != 0 && options->application_selected != 1) ||
+        memchr(options->application, '\0', sizeof options->application) == NULL ||
         !isfinite(monotonic_seconds) || monotonic_seconds < 0) {
         snprintf(error, TUI_ERROR_LEN, "invalid dashboard options or clock");
 
@@ -277,7 +329,11 @@ int tui_reader_refresh(struct tui_reader *reader, const struct tui_options *opti
     const int64_t cutoff = now < INT64_MIN + options->recent_seconds
                            ? INT64_MIN : now - options->recent_seconds;
 
-    if (bind_filters(reader->live, options) != SQLITE_OK ||
+    if (bind_application(reader->live, options) != SQLITE_OK ||
+        bind_application(reader->top, options) != SQLITE_OK ||
+        sqlite3_bind_int(reader->applications, 1, options->sort) != SQLITE_OK ||
+        read_applications(reader->applications, snapshot) == -1 ||
+        bind_filters(reader->live, options) != SQLITE_OK ||
         sqlite3_bind_int(reader->live, 4, options->recent_seconds) != SQLITE_OK ||
         sqlite3_bind_int64(reader->live, 5, cutoff) != SQLITE_OK ||
         sqlite3_bind_int64(reader->live, 6, now) != SQLITE_OK ||

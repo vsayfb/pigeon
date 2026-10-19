@@ -123,24 +123,36 @@ opens an existing schema-version-4 database read-only, never creates or migrates
 it, and does not require capture privileges. Quitting the viewer leaves capture
 running. `--once` prints a snapshot without requiring an interactive terminal.
 
-The screen contains Traffic overview, Live traffic, Top Conversations, and New
-endpoints. Wide terminals show all panels; smaller terminals show the overview
-and one selectable list. The minimum size is 60 columns by 16 rows; all panels
+The screen contains Traffic overview, Live traffic, Top Conversations,
+Applications, and New endpoints. Wide terminals show all panels; smaller
+terminals show the overview and one selectable list. The minimum size is
+60 columns by 16 rows; all panels
 fit at 110 columns by 26 rows. Lists show at most 200 matches.
 
 | Key | Action |
 | --- | --- |
 | Tab / Shift-Tab | Change panel |
 | Arrows, j/k, PgUp/PgDn, Home/End | Select a row |
-| Enter | Show details; Enter/Esc closes |
+| Enter | Show details; on Applications, filter conversations by selected application |
+| d | Show details for the selected entry; Enter/Esc closes |
+| a | Clear the exact application filter |
 | / | Search recorded name, remote IP, or application; Enter applies |
-| Esc | Clear applied search |
-| s | Sort Top Conversations by total, download, or upload |
+| Esc | Clear applied search and exact application filter |
+| s | Sort Top Conversations and Applications by total, download, or upload |
 | r | Cycle Live traffic window: 30s, 120s, all recorded, 10s |
 | f / v | Cycle protocol / address-family filters |
 | p | Pause automatic refresh |
 | ? | Show help |
 | q / Ctrl-C | Quit viewer |
+
+Applications ranks cumulative payload totals per executable basename, with a
+separate unresolved group. Use Tab to focus it, select a row, and press Enter to
+show that application's conversations. This switches focus to Top Conversations
+and clears text search, retaining protocol/family filters. The header shows the
+exact application filter; `a` clears it. Unresolved can be selected independently
+of all applications. Application details include conversation and remote-IP
+counts and the latest observation time. Wide layouts place Applications and New
+endpoints side by side below the conversation lists.
 
 Refreshes occur once per second. Overview totals and Top Conversations are
 cumulative database counters. Rates estimate changes in those counters between
@@ -153,7 +165,10 @@ payload, including retransmissions. They are not interface speeds or stored
 traffic history. Replay files with old timestamps appear in Top Conversations;
 select the all-recorded Live window to see them there too.
 
-Overview is unfiltered. Name/IP search and address-family filters apply to all lists;
+Overview and Applications are unfiltered. Application rankings include all
+stored conversations before limiting displayed applications to 200. The exact
+application filter applies only to Live traffic and Top Conversations. Name/IP
+search and address-family filters apply to conversation and endpoint lists;
 application search also matches the conversation lists.
 Protocol filtering applies to conversations only. New endpoints groups by
 remote IP across ports and local addresses, ordered by earliest recorded

@@ -47,6 +47,10 @@ int main(void) {
     strcpy(snapshot->live[0].key.application, "firefox");
     snprintf(snapshot->live[0].name, sizeof snapshot->live[0].name, "v6.test");
     snapshot->top[0] = snapshot->live[0];
+    snapshot->application_count = 3;
+    strcpy(snapshot->applications[0].name, "firefox");
+    strcpy(snapshot->applications[1].name, "chromium");
+    snapshot->applications[0].bytes_down = 1024;
     snapshot->history_count = 2;
     snapshot->history[0] = (struct tui_sample) { .down = 1024, .up = 0, .seconds = 2 };
     snapshot->history[1] = (struct tui_sample) { .down = 0, .up = 512, .seconds = 3 };
@@ -55,6 +59,7 @@ int main(void) {
     CHECK(contains("Live traffic"));
     CHECK(contains("Top Conversations"));
     CHECK(contains("New endpoints"));
+    CHECK(contains("Applications | all recorded"));
     CHECK(contains("firefox"));
     CHECK(contains("v6.test -> 2001:db8::42"));
     CHECK(contains("v6.test -> [2001:db8::42]:443/tcp"));
@@ -62,6 +67,22 @@ int main(void) {
     CHECK(contains("@_"));
     CHECK(contains("_="));
 
+    CHECK(resizeterm(26, 110) == OK);
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK(contains("Applications | all recorded"));
+    CHECK(contains("New endpoints"));
+
+    CHECK(resizeterm(24, 80) == OK);
+
+    for (int focus = 0; focus < 4; focus++) {
+        const char *titles[] = { "Live traffic", "Top Conversations", "Applications", "New endpoints" };
+
+        state.focus = focus;
+        tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+        CHECK(contains(titles[focus]));
+    }
+
+    state.focus = 0;
     CHECK(tui_screen_key('\t', snapshot, &options, &state) == 0);
     CHECK(state.focus == 1);
     CHECK(tui_screen_key('s', snapshot, &options, &state) == TUI_KEY_REFRESH);
@@ -82,6 +103,59 @@ int main(void) {
     tui_screen_key(KEY_DOWN, snapshot, &options, &state);
     tui_screen_key(27, snapshot, &options, &state);
     CHECK(state.details == 0);
+
+    CHECK(tui_screen_key('\t', snapshot, &options, &state) == 0);
+    CHECK(state.focus == 2);
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK(contains("Applications | all recorded"));
+    CHECK(tui_screen_key('d', snapshot, &options, &state) == 0);
+    CHECK(state.details == 1);
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK(contains("Application: firefox"));
+    tui_screen_key(27, snapshot, &options, &state);
+    CHECK(tui_screen_key('\n', snapshot, &options, &state) == TUI_KEY_REFRESH);
+    CHECK(options.application_selected == 1 && strcmp(options.application, "firefox") == 0);
+    CHECK(state.focus == 1 && options.search[0] == '\0');
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK(contains("App: firefox"));
+
+    state.focus = 2;
+    tui_screen_key(KEY_END, snapshot, &options, &state);
+    CHECK(state.selected[2] == 2);
+    CHECK(tui_screen_key('\n', snapshot, &options, &state) == TUI_KEY_REFRESH);
+    CHECK(options.application_selected == 1 && options.application[0] == '\0');
+    CHECK(tui_screen_key('a', snapshot, &options, &state) == TUI_KEY_REFRESH);
+    CHECK(options.application_selected == 0);
+
+    options.application_selected = 1;
+    strcpy(options.application, "firefox");
+    strcpy(options.search, "example");
+    tui_screen_key(27, snapshot, &options, &state);
+    CHECK(options.application_selected == 0 && options.search[0] == '\0');
+
+    struct tui_snapshot *next = malloc(sizeof *next);
+
+    CHECK(next != NULL);
+    *next = *snapshot;
+    next->applications[0] = snapshot->applications[1];
+    next->applications[1] = snapshot->applications[0];
+    state.focus = 2;
+    state.selected[2] = 0;
+    tui_screen_reselect(snapshot, next, &state);
+    CHECK(state.selected[2] == 1);
+
+    next->application_count = 0;
+    tui_screen_reselect(snapshot, next, &state);
+    CHECK(state.selected[2] == 0);
+    CHECK(tui_screen_key('\n', next, &options, &state) == 0);
+    CHECK(options.application_selected == 0);
+    free(next);
+
+    state.focus = 3;
+    tui_screen_key('\t', snapshot, &options, &state);
+    CHECK(state.focus == 0);
+    tui_screen_key(KEY_BTAB, snapshot, &options, &state);
+    CHECK(state.focus == 3);
 
     CHECK(resizeterm(10, 40) == OK);
     tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);

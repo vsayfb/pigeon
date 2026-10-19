@@ -99,7 +99,7 @@ static void timestamp(int64_t value, char out[40]) {
 
 static size_t panel_count(const struct tui_snapshot *snapshot, int focus) {
     return focus == 0 ? snapshot->live_count : focus == 1 ? snapshot->top_count
-                                                       : snapshot->endpoint_count;
+         : focus == 2 ? snapshot->application_count : snapshot->endpoint_count;
 }
 
 static void overview(struct panel p, const struct tui_snapshot *snapshot, int64_t now) {
@@ -257,12 +257,53 @@ static void conversation_panel(struct panel p, const struct tui_snapshot *snapsh
          "%zu shown (limit %d) | Enter: details", count, TUI_MAX_ROWS);
 }
 
+static void application_panel(struct panel p, const struct tui_snapshot *snapshot,
+                                const struct tui_options *options, const struct tui_screen *state) {
+    const char *sorts[] = { "total", "download", "upload" };
+    char title[100];
+
+    snprintf(title, sizeof title, "Applications | all recorded | %s", sorts[options->sort]);
+    draw_border(p, title, state->focus == 2);
+
+    const int name_width = p.width - 26;
+    const int visible = p.height - 4;
+    const size_t selected = state->selected[2];
+    const size_t start = selected >= (size_t)visible ? selected - (size_t)visible + 1 : 0;
+
+    text(p.y + 1, p.x + 1, p.width - 2, A_DIM,
+         "  %-*s       Down         Up", name_width, "Application");
+
+    for (int i = 0; i < visible && start + (size_t)i < snapshot->application_count; i++) {
+        const size_t index = start + (size_t)i;
+        const struct tui_application *row = &snapshot->applications[index];
+        char down[20];
+        char up[20];
+
+        bytes(row->bytes_down, down);
+        bytes(row->bytes_up, up);
+
+        const int active = options->application_selected && strcmp(options->application, row->name) == 0;
+
+        text(p.y + 2 + i, p.x + 1, p.width - 2,
+             state->focus == 2 && selected == index ? A_REVERSE : 0,
+             "%c %-*.*s %10.10s %10.10s", active ? '*' : selected == index ? '>' : ' ',
+             name_width, name_width, row->name[0] ? row->name : "unresolved", down, up);
+    }
+
+    if (snapshot->application_count == 0) {
+        text(p.y + 2, p.x + 2, p.width - 4, A_DIM, "No recorded applications");
+    }
+
+    text(p.y + p.height - 2, p.x + 2, p.width - 4, A_DIM,
+         "%zu shown | Enter filter | d details | a all apps", snapshot->application_count);
+}
+
 static void endpoint_panel(struct panel p, const struct tui_snapshot *snapshot,
                             const struct tui_screen *state) {
-    draw_border(p, "New endpoints | first seen in this database", state->focus == 2);
+    draw_border(p, "New endpoints | first seen in this database", state->focus == 3);
 
     const int visible = p.height - 3;
-    const size_t selected = state->selected[2];
+    const size_t selected = state->selected[3];
     const size_t start = selected >= (size_t)visible ? selected - (size_t)visible + 1 : 0;
 
     for (int i = 0; i < visible && start + (size_t)i < snapshot->endpoint_count; i++) {
@@ -274,7 +315,7 @@ static void endpoint_panel(struct panel p, const struct tui_snapshot *snapshot,
         ip_addr_str(&row->ip, address);
         timestamp(row->first_seen, first);
         text(p.y + 1 + i, p.x + 1, p.width - 2,
-             state->focus == 2 && selected == index ? A_REVERSE : 0,
+             state->focus == 3 && selected == index ? A_REVERSE : 0,
              "%c %.19s  %s%s%s", selected == index ? '>' : ' ', first, row->name,
              row->name[0] != '\0' ? " -> " : "", address);
     }
@@ -296,7 +337,7 @@ static void modal(const struct tui_snapshot *snapshot, const struct tui_screen *
         mvhline(y, p.x, ' ', p.width);
     }
 
-    draw_border(p, state->help ? "Help" : "Selected endpoint", 1);
+    draw_border(p, state->help ? "Help" : state->focus == 2 ? "Selected application" : "Selected endpoint", 1);
 
     char content[16][320] = { { 0 } };
     size_t count = 0;
@@ -304,13 +345,13 @@ static void modal(const struct tui_snapshot *snapshot, const struct tui_screen *
     if (state->help) {
         const char *lines[] = {
             "Tab / Shift-Tab  Change focused panel", "Up/Down, j/k     Select row; PgUp/PgDn, Home/End also work",
-            "Enter           Open details; Enter/Esc closes", "/               Search name, remote IP, or application (conversations)",
-            "s               Sort Top Conversations: total/down/up", "r               Live window: 10s / 30s / 120s / all",
+            "Enter           Details; on Applications: filter conversations", "/               Search name, remote IP, or application (conversations)",
+            "s               Sort conversations and applications: total/down/up", "r               Live window: 10s / 30s / 120s / all",
             "f               Conversation protocol: any / TCP / UDP", "v               Address family: any / IPv4 / IPv6",
             "p               Pause auto-refresh; collector keeps running", "q / Ctrl-C      Quit viewer; collector keeps running",
             "Rates are database counter deltas, not NIC speed.", "Totals count transport payload, including retransmissions.",
             "Graphs: old -> new, shared scale; _ is zero, @ is peak.", "No collector heartbeat is stored. Idle is not stopped.",
-            "New endpoints group remote IPs across ports/local IPs.", "Names are recorded DNS associations, not service proof."
+            "d: details | a: all apps | Esc: clear app filter and search", "Names are recorded DNS associations, not service proof."
         };
 
         count = sizeof lines / sizeof lines[0];
@@ -325,6 +366,17 @@ static void modal(const struct tui_snapshot *snapshot, const struct tui_screen *
         char last[40];
 
         if (state->focus == 2) {
+            const struct tui_application *row = &snapshot->applications[index];
+
+            timestamp(row->last_seen, last);
+            snprintf(content[count++], 320, "Application: %s", row->name[0] ? row->name : "unresolved");
+            snprintf(content[count++], 320, "Download: %.0f bytes", row->bytes_down);
+            snprintf(content[count++], 320, "Upload:   %.0f bytes", row->bytes_up);
+            snprintf(content[count++], 320, "Conversations: %" PRIu64, row->conversations);
+            snprintf(content[count++], 320, "Remote IPs: %" PRIu64, row->remote_ips);
+            snprintf(content[count++], 320, "Last seen: %s", last);
+            snprintf(content[count++], 320, "Enter on this panel filters conversation lists.");
+        } else if (state->focus == 3) {
             const struct tui_endpoint *row = &snapshot->endpoints[index];
 
             timestamp(row->first_seen, first);
@@ -390,29 +442,34 @@ void tui_screen_draw(const struct tui_snapshot *snapshot, const struct tui_optio
     }
     text(0, 1, COLS - 2, A_BOLD | COLOR_PAIR(1), "PIGEON | read-only viewer | %s | refresh %s ago",
          state->paused ? "AUTO-REFRESH PAUSED" : "1s refresh", latest);
-    text(1, 1, COLS - 2, 0, "DB: %s | Search: %s | Proto: %s | IP: %s", path,
+    text(1, 1, COLS - 2, 0, "App: %s | Search: %s | Proto: %s | IP: %s | DB: %s",
+         options->application_selected ? (options->application[0] ? options->application : "unresolved") : "all",
          options->search[0] ? options->search : "all", options->protocol == 6 ? "TCP" : options->protocol == 17 ? "UDP" : "any",
-         options->family == 4 ? "v4" : options->family == 6 ? "v6" : "any");
+         options->family == 4 ? "v4" : options->family == 6 ? "v6" : "any", path);
 
     const struct panel summary = { 2, 0, 6, COLS };
 
     overview(summary, snapshot, now);
 
     if (COLS >= 110 && LINES >= 26) {
-        const int bottom_height = LINES >= 34 ? 8 : 6;
+        const int bottom_height = LINES >= 34 ? 10 : 7;
         const int main_height = LINES - 10 - bottom_height;
         const int left_width = COLS / 2;
         const struct panel left = { 8, 0, main_height, left_width };
         const struct panel right = { 8, left_width, main_height, COLS - left_width };
-        const struct panel bottom = { 8 + main_height, 0, bottom_height, COLS };
+        const struct panel apps = { 8 + main_height, 0, bottom_height, left_width };
+        const struct panel endpoints = { 8 + main_height, left_width, bottom_height, COLS - left_width };
 
         conversation_panel(left, snapshot, options, state, 0, now);
         conversation_panel(right, snapshot, options, state, 1, now);
-        endpoint_panel(bottom, snapshot, state);
+        application_panel(apps, snapshot, options, state);
+        endpoint_panel(endpoints, snapshot, state);
     } else {
         const struct panel list = { 8, 0, LINES - 10, COLS };
 
         if (state->focus == 2) {
+            application_panel(list, snapshot, options, state);
+        } else if (state->focus == 3) {
             endpoint_panel(list, snapshot, state);
         } else {
             conversation_panel(list, snapshot, options, state, state->focus, now);
@@ -420,8 +477,10 @@ void tui_screen_draw(const struct tui_snapshot *snapshot, const struct tui_optio
     }
 
     text(LINES - 2, 1, COLS - 2, error[0] ? COLOR_PAIR(3) : A_DIM,
-         "%s", error[0] ? error : "Tab panel | arrows select | Enter details | / search | s sort | r recent | f/v filters | p pause");
-    text(LINES - 1, 1, COLS - 2, A_DIM, "? help | q quit (collector keeps running) | Lists show up to 200 matches");
+         "%s", error[0] ? error : state->focus == 2
+         ? "Tab panel | arrows select | Enter filter app | / search | s sort | p pause"
+         : "Tab panel | arrows select | Enter details | / search | s sort | r recent | f/v filters | p pause");
+    text(LINES - 1, 1, COLS - 2, A_DIM, "a all apps | d details | ? help | q quit | Lists show up to 200 matches");
 
     if (state->details || state->help) {
         modal(snapshot, state);
@@ -463,7 +522,7 @@ int tui_screen_key(int key, const struct tui_snapshot *snapshot,
     }
 
     if (state->help || state->details) {
-        const size_t lines = state->help ? 16 : state->focus == 2 ? 5 : 12;
+        const size_t lines = state->help ? 16 : state->focus == 3 ? 5 : state->focus == 2 ? 7 : 12;
         const int visible = (LINES < 23 ? LINES - 4 : 19) - 3;
         const size_t maximum = visible > 0 && lines > (size_t)visible ? lines - (size_t)visible : 0;
 
@@ -483,11 +542,11 @@ int tui_screen_key(int key, const struct tui_snapshot *snapshot,
 
     switch (key) {
         case '\t':
-            state->focus = (state->focus + 1) % 3;
+            state->focus = (state->focus + 1) % 4;
             break;
 
         case KEY_BTAB:
-            state->focus = (state->focus + 2) % 3;
+            state->focus = (state->focus + 3) % 4;
             break;
 
         case KEY_DOWN:
@@ -524,6 +583,21 @@ int tui_screen_key(int key, const struct tui_snapshot *snapshot,
 
         case '\n':
         case KEY_ENTER:
+            if (state->focus == 2 && count != 0) {
+                memcpy(options->application, snapshot->applications[*selected].name, sizeof options->application);
+                options->application_selected = 1;
+                options->search[0] = '\0';
+                state->focus = 1;
+                state->selected[0] = state->selected[1] = 0;
+
+                return TUI_KEY_REFRESH;
+            }
+
+            state->details = count != 0;
+            state->modal_scroll = 0;
+            break;
+
+        case 'd':
             state->details = count != 0;
             state->modal_scroll = 0;
             break;
@@ -538,7 +612,15 @@ int tui_screen_key(int key, const struct tui_snapshot *snapshot,
             state->searching = 1;
             break;
 
+        case 'a':
+            options->application_selected = 0;
+            options->application[0] = '\0';
+
+            return TUI_KEY_REFRESH;
+
         case 27:
+            options->application_selected = 0;
+            options->application[0] = '\0';
             options->search[0] = '\0';
 
             return TUI_KEY_REFRESH;
@@ -579,7 +661,7 @@ int tui_screen_key(int key, const struct tui_snapshot *snapshot,
 
 void tui_screen_reselect(const struct tui_snapshot *old, const struct tui_snapshot *next,
                           struct tui_screen *state) {
-    for (int focus = 0; focus < 3; focus++) {
+    for (int focus = 0; focus < 4; focus++) {
         const size_t count = panel_count(next, focus);
         const size_t previous = state->selected[focus];
 
@@ -593,6 +675,8 @@ void tui_screen_reselect(const struct tui_snapshot *old, const struct tui_snapsh
             int same;
 
             if (focus == 2) {
+                same = strcmp(old->applications[previous].name, next->applications[i].name) == 0;
+            } else if (focus == 3) {
                 same = ip_addr_equal(&old->endpoints[previous].ip, &next->endpoints[i].ip);
             } else {
                 const struct tui_conversation *a = focus == 0 ? old->live : old->top;

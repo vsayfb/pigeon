@@ -7,8 +7,8 @@
 #define TUI_KEY_REFRESH 2
 
 struct tui_screen {
-    int focus;                /* live, top conversations, new endpoints */
-    size_t selected[3];
+    int focus;                /* live, top conversations, applications, new endpoints */
+    size_t selected[4];
     int paused;
     int searching;
     int details;

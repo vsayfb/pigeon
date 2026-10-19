@@ -66,6 +66,16 @@ static void print_snapshot(const struct tui_snapshot *snapshot) {
         print_row(&snapshot->top[i]);
     }
 
+    puts("Applications (all recorded; total traffic)");
+
+    for (size_t i = 0; i < snapshot->application_count; i++) {
+        const struct tui_application *row = &snapshot->applications[i];
+
+        print_safe(row->name[0] ? row->name : "unresolved");
+        printf(" down=%.0f up=%.0f conversations=%" PRIu64 " remote_ips=%" PRIu64 "\n",
+               row->bytes_down, row->bytes_up, row->conversations, row->remote_ips);
+    }
+
     puts("New endpoints (database first seen)");
 
     for (size_t i = 0; i < snapshot->endpoint_count; i++) {

@@ -17,6 +17,8 @@ struct tui_options {
     int family;                /* 0, 4 or 6 */
     int recent_seconds;        /* zero means all recorded */
     enum tui_sort sort;
+    int application_selected;  /* distinguishes all apps from unresolved (empty name) */
+    char application[FLOW_APP_LEN];
 };
 
 struct tui_conversation {
@@ -32,6 +34,15 @@ struct tui_endpoint {
     int64_t last_seen;
 };
 
+struct tui_application {
+    char name[FLOW_APP_LEN];
+    double bytes_down;
+    double bytes_up;
+    uint64_t conversations;
+    uint64_t remote_ips;
+    int64_t last_seen;
+};
+
 struct tui_sample {
     double down;
     double up;
@@ -42,9 +53,11 @@ struct tui_snapshot {
     struct tui_conversation live[TUI_MAX_ROWS];
     struct tui_conversation top[TUI_MAX_ROWS];
     struct tui_endpoint endpoints[TUI_MAX_ROWS];
+    struct tui_application applications[TUI_MAX_ROWS];
     size_t live_count;
     size_t top_count;
     size_t endpoint_count;
+    size_t application_count;
 
     uint64_t conversations;
     uint64_t remote_ips;
@@ -75,7 +88,9 @@ void tui_reader_close(struct tui_reader *reader);
  * TUI_MAX_ROWS matches. Search matches name/IP/application on conversation
  * lists, name/IP on endpoints. Rankings are cumulative; recent_seconds applies only
  * to Live Traffic. Protocol filtering applies to conversation lists; endpoint
- * first-seen times always span the complete database. Overview is unfiltered.
+ * first-seen times always span the complete database. Exact application
+ * selection filters only conversations. Overview and Applications are unfiltered;
+ * Applications groups all stored rows before ranking (not just the top 200).
  * Rates are estimated from database counter deltas, not packet timestamps.
  * Returns 0 on success or -1 with error set, leaving out and rate history
  * unchanged. No returned data borrows SQLite memory. */
