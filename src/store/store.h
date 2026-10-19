@@ -18,7 +18,7 @@ struct store_row {
 
 /*
  * Opens or creates path, or an isolated in-memory database for ":memory:".
- * Creates schema version 1 only in an empty, unversioned database; rejects
+ * Creates schema version 2 in an empty database and migrates version 1; rejects
  * unsupported versions. File databases use WAL and synchronous=FULL.
  * The caller owns the store and releases it with store_close(). error must
  * provide STORE_ERROR_LEN writable bytes. No database handle is borrowed.
@@ -56,5 +56,26 @@ int store_lookup(struct store *store, const struct flow_key *key, struct store_r
 /* Returns a borrowed explanation of the last error, valid until the next
  * store operation or close. Successful operations clear the explanation. */
 const char *store_error(const struct store *store);
+
+struct store_dns_row {
+    uint32_t ip;
+    char name[STORE_NAME_LEN];
+    int64_t observed_at;
+    int64_t expires_at;
+};
+
+/* Saves one mapping atomically. Equal timestamps allow replacement; older
+ * observations cannot replace newer ones. The row is borrowed for the call.
+ * Returns 1 if saved, 0 if older and ignored, or -1 with store_error() set
+ * on failure. A failed save leaves the database unchanged. */
+int store_dns_save(struct store *store, const struct store_dns_row *row);
+
+/* Visits unexpired rows in observation-time order. Rows and user are borrowed
+ * during the call; the callback must not operate on store. The callback
+ * returns 0 on success, or -1 to stop loading. Returns 0 on success or -1
+ * with store_error() set on query/callback failure. Earlier callback effects
+ * are not rolled back. now is Unix seconds; expiry is exclusive. */
+int store_dns_load(struct store *store, int64_t now,
+                    int (*visit)(const struct store_dns_row *row, void *user), void *user);
 
 #endif

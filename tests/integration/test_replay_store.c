@@ -5,6 +5,8 @@
 
 #include "../t.h"
 #include "store/store.h"
+#include "dns/dns_cache.h"
+#include <string.h>
 
 static void run_replay(const char *program, const char *fixture, const char *database) {
     const pid_t child = fork();
@@ -31,8 +33,46 @@ static void run_replay(const char *program, const char *fixture, const char *dat
     CHECK(WEXITSTATUS(status) == 0);
 }
 
+static void test_named_replay(const char *program, const char *fixture) {
+    char path[] = "/tmp/pigeon-dns-replay-XXXXXX";
+    const int fd = mkstemp(path);
+
+    CHECK(fd != -1);
+    CHECK(close(fd) == 0);
+
+    run_replay(program, fixture, path);
+
+    char error[STORE_ERROR_LEN];
+    struct store *store = store_open(path, error);
+    struct store_row row;
+
+    const struct flow_key key = {
+        .us_ip = 0xC000020A, .remote_ip = 0xC633642A,
+        .remote_port = 443, .protocol = 17
+    };
+
+    CHECK(store != NULL);
+    CHECK(store_lookup(store, &key, &row) == 1);
+    CHECK(row.delta.packets_out == 1);
+    CHECK(row.delta.bytes_out == 1);
+    CHECK(strcmp(row.remote_name, "www.example.test") == 0);
+
+    struct dns_cache *cache = dns_cache_create(store, 8, 1700000003);
+
+    CHECK(cache != NULL);
+    CHECK(strcmp(dns_cache_lookup(cache, key.remote_ip, 1700000003), "www.example.test") == 0);
+
+    dns_cache_destroy(cache);
+    store_close(store);
+
+    CHECK(unlink(path) == 0);
+}
+
 int main(int argc, char **argv) {
-    CHECK(argc == 3);
+    CHECK(argc == 5);
+
+    test_named_replay(argv[1], argv[3]);
+    test_named_replay(argv[1], argv[4]);
 
     char path[] = "/tmp/pigeon-replay-XXXXXX";
     const int fd = mkstemp(path);

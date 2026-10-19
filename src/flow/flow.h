@@ -6,6 +6,7 @@
 
 struct flow;
 struct store;
+struct dns_cache;
 
 /*
  * Creates a tracker for local_ip (host byte order), owning a conversation
@@ -38,7 +39,7 @@ void flow_destroy(struct flow *flow);
  * Returns 1 for an observed conversation, 0 for an ignored packet, or -1
  * with errno set on allocation or handoff failure, leaving the tracker unchanged.
  */
-int flow_observe(const struct flow *flow, const struct packet_view *packet, int64_t now);
+int flow_observe(struct flow *flow, const struct packet_view *packet, int64_t now);
 
 /* Returns the number of conversations currently held by the tracker. */
 size_t flow_count(const struct flow *flow);
@@ -85,5 +86,12 @@ int flow_flush(struct flow *flow);
  * semantics as flow_flush(). Call flow_flush() before shutdown/destroy.
  */
 int flow_tick(struct flow *flow, int64_t now);
+
+/* Attaches a borrowed DNS cache. Names are looked up on observation and again
+ * at flush using the latest observation/tick time.
+ * Late names can be written with zero counter deltas. First assigned names
+ * are retained on entries and stored conversations after cache expiry.
+ * The cache must outlive the tracker or be detached with NULL. */
+void flow_set_dns_cache(struct flow *flow, struct dns_cache *cache);
 
 #endif

@@ -2,10 +2,13 @@
 
 #include <errno.h>
 #include <stdlib.h>
+#include <string.h>
 
 struct flow_entry {
     struct flow_key key;
     struct flow_delta delta;
+    char name[FLOW_NAME_LEN];
+    int name_pending;
     struct flow_entry *next;
 
     struct flow_entry *newer;
@@ -142,6 +145,8 @@ struct flow_entry *flow_table_insert(struct flow_table *table,
 
     entry->key = *key;
     entry->delta = (struct flow_delta){ 0 };
+    entry->name[0] = '\0';
+    entry->name_pending = 0;
 
     if (table->count == table->capacity) {
         if (table->on_evict != NULL &&
@@ -244,4 +249,23 @@ const struct flow_delta *flow_entry_delta(const struct flow_entry *entry) {
 
 void flow_entry_set_delta(struct flow_entry *entry, const struct flow_delta *delta) {
     entry->delta = *delta;
+}
+
+const char *flow_entry_name(const struct flow_entry *entry) {
+    return entry->name;
+}
+
+void flow_entry_set_name(struct flow_entry *entry, const char *name) {
+    if (entry->name[0] == '\0' && name[0] != '\0') {
+        memcpy(entry->name, name, strlen(name) + 1);
+        entry->name_pending = 1;
+    }
+}
+
+int flow_entry_name_pending(const struct flow_entry *entry) {
+    return entry->name_pending;
+}
+
+void flow_entry_clear_name_pending(struct flow_entry *entry) {
+    entry->name_pending = 0;
 }

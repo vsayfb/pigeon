@@ -81,7 +81,16 @@ Complete records remain available when a later answer is truncated. The parser
 bounds questions, answer records, name walks, and caller-provided output.
 It supports printable ASCII labels; binary labels requiring escaped display
 are not supported. Authority and additional sections are ignored.
-DNS cache, SQLite persistence of DNS mappings, and flow naming are not wired yet.
+Incoming UDP/53 replies addressed to the local IP now update a bounded DNS cache
+and SQLite. Saved mappings reload at startup and expire according to the minimum
+CNAME/A TTL. Flows look up names on observation and at flush; a late reply can
+name an already flushed conversation without adding its counters again.
+Verbose conversation summaries include `name=...` (`name=-` when unknown).
+Existing schema-version-1 databases migrate automatically to version 2.
+
+The cache keeps the last observed name for a shared IP; stored conversations
+retain their first assigned name. Only plaintext UDP/53 A responses are learned;
+TCP DNS, IPv6 records, DoH and DoT remain outside this version.
 
 Synthetic query/reply fixtures use RFC 5737 addresses and valid checksums.
 Regenerate them with:
@@ -89,7 +98,18 @@ Regenerate them with:
 ```sh
 python3 tests/fixtures/make_dns_a_record.py
 python3 tests/fixtures/make_dns_compressed.py
+python3 tests/fixtures/make_dns_named_flow.py
 ```
 
 Parser tests replay both fixtures. See [tests/fuzz/README.md](tests/fuzz/README.md)
 for deterministic and coverage-guided fuzzing commands.
+
+To inspect DNS naming through the entire pipeline:
+
+```sh
+./build/pigeon --verbose --local-ip 192.0.2.10 -r tests/fixtures/flow_before_dns.pcap
+```
+
+The service conversation to `198.51.100.42:443` receives `www.example.test`,
+even though the traffic precedes the DNS reply. Use `--db <path>` to persist
+both conversation totals and DNS mappings from replay.

@@ -1,9 +1,9 @@
 #ifndef PIGEON_STORE_SCHEMA_H
 #define PIGEON_STORE_SCHEMA_H
 
-#define SCHEMA_VERSION 1
+#define SCHEMA_VERSION 2
 
-#define STORE_SCHEMA_SQL \
+#define STORE_CONVERSATIONS_SQL \
     "CREATE TABLE conversations (" \
     "us_ip INTEGER NOT NULL CHECK(us_ip BETWEEN 0 AND 4294967295)," \
     "remote_ip INTEGER NOT NULL CHECK(remote_ip BETWEEN 0 AND 4294967295)," \
@@ -17,8 +17,29 @@
     "last_seen INTEGER NOT NULL CHECK(first_seen<=last_seen)," \
     "remote_name TEXT CHECK(remote_name IS NULL OR length(remote_name) BETWEEN 1 AND 253)," \
     "PRIMARY KEY(us_ip,remote_ip,remote_port,protocol)" \
-    ") WITHOUT ROWID;" \
-    "PRAGMA user_version=1;"
+    ") WITHOUT ROWID;"
+
+#define STORE_DNS_SCHEMA_SQL \
+    "CREATE TABLE dns_cache (" \
+    "ip INTEGER PRIMARY KEY CHECK(ip BETWEEN 0 AND 4294967295)," \
+    "name TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 253)," \
+    "observed_at INTEGER NOT NULL," \
+    "expires_at INTEGER NOT NULL CHECK(expires_at>=observed_at)" \
+    ");" \
+    "CREATE INDEX dns_cache_expiry ON dns_cache(expires_at);" \
+    "PRAGMA user_version=2;"
+
+#define STORE_SCHEMA_SQL STORE_CONVERSATIONS_SQL STORE_DNS_SCHEMA_SQL
+
+#define STORE_DNS_UPSERT_SQL \
+    "INSERT INTO dns_cache(ip,name,observed_at,expires_at) VALUES(?1,?2,?3,?4)" \
+    " ON CONFLICT(ip) DO UPDATE SET name=excluded.name," \
+    " observed_at=excluded.observed_at,expires_at=excluded.expires_at" \
+    " WHERE excluded.observed_at>=dns_cache.observed_at;"
+
+#define STORE_DNS_LOAD_SQL \
+    "SELECT ip,name,observed_at,expires_at FROM dns_cache WHERE expires_at>?1" \
+    " ORDER BY observed_at,ip;"
 
 #define STORE_UPSERT_SQL \
     "INSERT INTO conversations (us_ip,remote_ip,remote_port,protocol," \

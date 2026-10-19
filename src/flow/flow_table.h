@@ -5,6 +5,8 @@
 
 #include "flow/flow_key.h"
 
+#define FLOW_NAME_LEN 254
+
 struct flow_table;
 struct flow_entry;
 
@@ -97,5 +99,16 @@ const struct flow_delta *flow_entry_delta(const struct flow_entry *entry);
 
 /* Copies delta into the entry. Does not change recency. */
 void flow_entry_set_delta(struct flow_entry *entry, const struct flow_delta *delta);
+
+/* Returns the borrowed first assigned name, or an empty string if unnamed. */
+const char *flow_entry_name(const struct flow_entry *entry);
+
+/* Copies name only into an unnamed entry and marks its name pending storage.
+ * name must be NUL terminated and shorter than FLOW_NAME_LEN bytes. */
+void flow_entry_set_name(struct flow_entry *entry, const char *name);
+
+/* Reports/clears a name awaiting successful persistence. */
+int flow_entry_name_pending(const struct flow_entry *entry);
+void flow_entry_clear_name_pending(struct flow_entry *entry);
 
 #endif

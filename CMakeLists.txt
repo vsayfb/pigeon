@@ -32,6 +32,7 @@ add_library(pigeon_core STATIC
         src/flow/flow.c
         src/store/store.c
         src/dns/dns_parse.c
+        src/dns/dns_cache.c
 )
 target_link_libraries(pigeon_core PUBLIC ${PCAP_LIBRARY} SQLite::SQLite3)
 
@@ -108,7 +109,9 @@ add_test(NAME flow_flush COMMAND test_flow_flush)
 add_executable(test_replay_store tests/integration/test_replay_store.c)
 target_link_libraries(test_replay_store PRIVATE pigeon_core)
 add_test(NAME replay_store COMMAND test_replay_store $<TARGET_FILE:pigeon>
-        ${CMAKE_SOURCE_DIR}/tests/fixtures/short_frames.pcap)
+        ${CMAKE_SOURCE_DIR}/tests/fixtures/short_frames.pcap
+        ${CMAKE_SOURCE_DIR}/tests/fixtures/dns_before_flow.pcap
+        ${CMAKE_SOURCE_DIR}/tests/fixtures/flow_before_dns.pcap)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(test_capture_tick tests/unit/test_capture_tick.c)
@@ -129,3 +132,7 @@ add_test(NAME dns_parse COMMAND test_dns_parse)
 
 add_executable(fuzz_dns_parse tests/fuzz/fuzz_dns_parse.c)
 target_link_libraries(fuzz_dns_parse PRIVATE pigeon_core)
+
+add_executable(test_dns_cache tests/unit/test_dns_cache.c)
+target_link_libraries(test_dns_cache PRIVATE pigeon_core)
+add_test(NAME dns_cache COMMAND test_dns_cache)

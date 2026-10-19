@@ -250,7 +250,7 @@ static void test_file_reopen_wal_and_schema_versions(void) {
     sqlite3_stmt *statement = NULL;
 
     CHECK(sqlite3_open(path, &db) == SQLITE_OK);
-    CHECK(read_scalar(db, "PRAGMA user_version") == 1);
+    CHECK(read_scalar(db, "PRAGMA user_version") == 2);
     CHECK(sqlite3_prepare_v2(db, "PRAGMA journal_mode", -1, &statement, NULL) == SQLITE_OK);
     CHECK(sqlite3_step(statement) == SQLITE_ROW);
     CHECK(strcmp((const char *)sqlite3_column_text(statement, 0), "wal") == 0);

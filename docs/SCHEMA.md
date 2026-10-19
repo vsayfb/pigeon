@@ -1,10 +1,12 @@
 # SQLite schema
 
-Schema version: **1**, stored in `PRAGMA user_version`.
+Schema version: **2**, stored in `PRAGMA user_version`.
 
 The storage module creates the schema only when version is zero and the
-existing database has no application objects. Other versions are rejected;
-there are no migrations yet. Opening a versioned database also prepares the
+existing database has no application objects. A version-1 database is migrated
+transactionally by adding `dns_cache` and its expiry index; conversation rows
+are unchanged. Other versions are rejected. A failed migration rolls back its
+schema changes and version update. Opening a versioned database also prepares the
 conversation statements, which fails if the required table or columns are
 missing.
 
@@ -74,3 +76,41 @@ Live capture defaults to `pigeon.db`; `--db` selects another path. Replay with
 `--local-ip` defaults to an in-memory database unless `--db` is specified.
 Verbose shutdown output shows stored totals for entries still active in memory.
 Expired and evicted entries remain queryable in SQLite.
+
+
+## `dns_cache`
+
+| Column | Storage | Meaning |
+|---|---|---|
+| `ip` | INTEGER PRIMARY KEY | IPv4 address, host-order numeric value |
+| `name` | TEXT NOT NULL | Last observed name, 1–253 bytes in the C API |
+| `observed_at` | INTEGER NOT NULL | Capture timestamp in Unix seconds |
+| `expires_at` | INTEGER NOT NULL | Exclusive TTL expiry in Unix seconds |
+
+`dns_cache_expiry` indexes `expires_at`. Each observed mapping is upserted in
+an atomic write before updating the memory map. Older capture timestamps
+cannot replace newer mappings; equal timestamps allow the latest observation
+to win. A zero TTL stores an immediately expired replacement, invalidating the
+previous name. Expiry is `observed_at + minimum_chain_ttl`, saturating at
+`INT64_MAX`. Expired rows remain on disk but are excluded from live reload and
+lookup. DNS reply mappings are saved individually; earlier successful mappings
+remain saved if a later mapping in that reply cannot be written.
+
+The memory cache has a capacity of 4,096 IPs and 256 hash buckets. Capacity
+replacement prefers an expired entry, then the oldest observation. Startup
+loads mappings in observation order, retaining the newest ones when over
+capacity. Offline startup loads without a wall-clock cutoff, while lookup uses
+the replay timestamp and rejects names observed in the future.
+
+A mapping is usable only while `observed_at <= now < expires_at`. Flows check
+at observation and again at flush, including clean entries receiving a late
+name. A zero-counter upsert can name a previously flushed conversation without
+adding traffic. Once assigned, the conversation's name remains historical and
+is preserved even when the cache mapping changes or expires.
+
+Only A records from incoming plaintext UDP/53 responses addressed to the local
+IP are learned. TCP DNS, AAAA records, DoH and DoT are not learned. Complete
+results from partial responses are accepted; malformed responses are ignored.
+This is an observed IP-to-name association, not proof of the service behind an
+IP. Shared CDN addresses use the last observed cache name; a stored conversation
+retains its first assigned name.

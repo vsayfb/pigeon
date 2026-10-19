@@ -10,6 +10,8 @@ struct store {
     sqlite3 *db;
     sqlite3_stmt *upsert;
     sqlite3_stmt *lookup;
+    sqlite3_stmt *dns_save;
+    sqlite3_stmt *dns_load;
 
     char error[STORE_ERROR_LEN];
     int unusable;
@@ -83,6 +85,10 @@ static int initialize_schema(struct store *store) {
         }
 
         if (execute(store, STORE_SCHEMA_SQL) == -1) {
+            goto error;
+        }
+    } else if (version == 1) {
+        if (execute(store, STORE_DNS_SCHEMA_SQL) == -1) {
             goto error;
         }
     } else if (version != SCHEMA_VERSION) {
@@ -159,7 +165,11 @@ struct store *store_open(const char *path, char error[STORE_ERROR_LEN]) {
     if (sqlite3_prepare_v2(store->db, STORE_UPSERT_SQL, -1,
                            &store->upsert, NULL) != SQLITE_OK ||
         sqlite3_prepare_v2(store->db, STORE_LOOKUP_SQL, -1,
-                           &store->lookup, NULL) != SQLITE_OK) {
+                           &store->lookup, NULL) != SQLITE_OK ||
+        sqlite3_prepare_v2(store->db, STORE_DNS_UPSERT_SQL, -1,
+                           &store->dns_save, NULL) != SQLITE_OK ||
+        sqlite3_prepare_v2(store->db, STORE_DNS_LOAD_SQL, -1,
+                           &store->dns_load, NULL) != SQLITE_OK) {
         fail(store, "prepare conversation statements");
         goto error;
     }
@@ -182,6 +192,8 @@ void store_close(struct store *store) {
 
     sqlite3_finalize(store->upsert);
     sqlite3_finalize(store->lookup);
+    sqlite3_finalize(store->dns_save);
+    sqlite3_finalize(store->dns_load);
     sqlite3_close(store->db);
     free(store);
 }
@@ -344,4 +356,92 @@ int store_lookup(struct store *store, const struct flow_key *key, struct store_r
 
 const char *store_error(const struct store *store) {
     return store->error;
+}
+
+int store_dns_save(struct store *store, const struct store_dns_row *row) {
+    store->error[0] = '\0';
+
+    if (store->unusable || memchr(row->name, '\0', sizeof row->name) == NULL ||
+        row->name[0] == '\0' || row->expires_at < row->observed_at) {
+        snprintf(store->error, sizeof store->error, "invalid DNS row or unavailable database");
+
+        return -1;
+    }
+
+    int rc = sqlite3_bind_int64(store->dns_save, 1, row->ip);
+
+    if (rc == SQLITE_OK) {
+        rc = sqlite3_bind_text(store->dns_save, 2, row->name, -1, SQLITE_TRANSIENT);
+    }
+
+    if (rc == SQLITE_OK) {
+        rc = sqlite3_bind_int64(store->dns_save, 3, row->observed_at);
+    }
+
+    if (rc == SQLITE_OK) {
+        rc = sqlite3_bind_int64(store->dns_save, 4, row->expires_at);
+    }
+
+    int result;
+
+    if (rc != SQLITE_OK || sqlite3_step(store->dns_save) != SQLITE_DONE) {
+        result = fail(store, "save DNS mapping");
+    } else {
+        result = sqlite3_changes(store->db) != 0;
+    }
+
+    sqlite3_reset(store->dns_save);
+    sqlite3_clear_bindings(store->dns_save);
+
+    return result;
+}
+
+int store_dns_load(struct store *store, int64_t now,
+                    int (*visit)(const struct store_dns_row *row, void *user), void *user) {
+    store->error[0] = '\0';
+
+    if (sqlite3_bind_int64(store->dns_load, 1, now) != SQLITE_OK) {
+        fail(store, "bind DNS load");
+        sqlite3_reset(store->dns_load);
+        sqlite3_clear_bindings(store->dns_load);
+
+        return -1;
+    }
+
+    int rc;
+    int result = 0;
+
+    while ((rc = sqlite3_step(store->dns_load)) == SQLITE_ROW) {
+        struct store_dns_row row = {
+            .ip = (uint32_t)sqlite3_column_int64(store->dns_load, 0),
+            .observed_at = sqlite3_column_int64(store->dns_load, 2),
+            .expires_at = sqlite3_column_int64(store->dns_load, 3)
+        };
+
+        const char *name = (const char *)sqlite3_column_text(store->dns_load, 1);
+        const int bytes = sqlite3_column_bytes(store->dns_load, 1);
+
+        if (name == NULL || bytes <= 0 || (size_t)bytes >= sizeof row.name) {
+            snprintf(store->error, sizeof store->error, "invalid stored DNS name");
+            result = -1;
+            break;
+        }
+
+        memcpy(row.name, name, (size_t)bytes + 1);
+
+        if (visit(&row, user) == -1) {
+            snprintf(store->error, sizeof store->error, "DNS load callback failed");
+            result = -1;
+            break;
+        }
+    }
+
+    if (result == 0 && rc != SQLITE_DONE) {
+        result = fail(store, "load DNS mappings");
+    }
+
+    sqlite3_reset(store->dns_load);
+    sqlite3_clear_bindings(store->dns_load);
+
+    return result;
 }

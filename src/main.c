@@ -2,6 +2,7 @@
 #include <inttypes.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
 
 #include "capture/capture.h"
 #include "net/netif.h"
@@ -9,6 +10,7 @@
 #include "proto/packet.h"
 #include "proto/pktdump.h"
 #include "store/store.h"
+#include "dns/dns_cache.h"
 
 #ifndef PIGEON_VERSION
 #define PIGEON_VERSION "dev"
@@ -23,6 +25,8 @@ struct capture_context {
     struct flow *flows;
     struct store *store;
     int offline;
+    uint32_t local_ip;
+    struct dns_cache *dns;
 };
 
 static void report_flow_error(struct capture_context *context) {
@@ -39,6 +43,10 @@ static void report_flow_error(struct capture_context *context) {
 static void tick_flows(int64_t now, void *user) {
     struct capture_context *context = user;
 
+    if (context->dns != NULL) {
+        dns_cache_expire(context->dns, now);
+    }
+
     if (!context->failed && flow_tick(context->flows, now) == -1) {
         report_flow_error(context);
     }
@@ -51,6 +59,11 @@ static void observe_frame(const uint8_t *data, const uint32_t caplen,
     const int rc = packet_parse(data, caplen, &packet);
 
     context->count++;
+
+    if (!context->failed && rc == 0 && context->dns != NULL &&
+        dns_cache_observe(context->dns, &packet, context->local_ip, timestamp) == -1) {
+        report_flow_error(context);
+    }
 
     if (context->offline && context->flows != NULL) {
         tick_flows(timestamp, context);
@@ -91,10 +104,11 @@ static void print_conversation(const struct flow_entry *entry, void *user) {
 
     fprintf(stdout, "flow %s > %s:%u proto=%u packets_out=%" PRIu64
             " packets_in=%" PRIu64 " bytes_out=%" PRIu64 " bytes_in=%" PRIu64
-            " first_seen=%" PRId64 " last_seen=%" PRId64 "\n",
+            " first_seen=%" PRId64 " last_seen=%" PRId64 " name=%s\n",
             ipv4_addr_str(key->us_ip, local), ipv4_addr_str(key->remote_ip, remote),
             key->remote_port, key->protocol, delta->packets_out, delta->packets_in,
-            delta->bytes_out, delta->bytes_in, delta->first_seen, delta->last_seen);
+            delta->bytes_out, delta->bytes_in, delta->first_seen, delta->last_seen,
+            row.remote_name[0] != '\0' ? row.remote_name : "-");
 }
 
 int main(const int argc, char **argv) {
@@ -163,6 +177,7 @@ int main(const int argc, char **argv) {
     }
 
     context.offline = offline;
+    context.local_ip = local_ip;
 
     if (tracking) {
         char error[STORE_ERROR_LEN];
@@ -188,7 +203,29 @@ int main(const int argc, char **argv) {
             return 1;
         }
 
+        const time_t startup_time = offline ? 0 : time(NULL);
+
+        if (!offline && startup_time == (time_t)-1) {
+            perror("startup clock");
+            flow_destroy(context.flows);
+            store_close(context.store);
+
+            return 1;
+        }
+
+        context.dns = dns_cache_create(context.store, 4096,
+                                       offline ? INT64_MIN : (int64_t)startup_time);
+
+        if (context.dns == NULL) {
+            report_flow_error(&context);
+            flow_destroy(context.flows);
+            store_close(context.store);
+
+            return 1;
+        }
+
         flow_set_store(context.flows, context.store);
+        flow_set_dns_cache(context.flows, context.dns);
     }
 
     int rc;
@@ -221,6 +258,7 @@ int main(const int argc, char **argv) {
     }
 
     flow_destroy(context.flows);
+    dns_cache_destroy(context.dns);
     store_close(context.store);
 
     return rc == 0 && !context.failed ? 0 : 1;

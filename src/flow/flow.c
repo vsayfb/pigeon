@@ -1,8 +1,10 @@
 #include "flow/flow.h"
 #include "store/store.h"
+#include "dns/dns_cache.h"
 
 #include <errno.h>
 #include <stdlib.h>
+#include <string.h>
 
 struct flow {
     uint32_t local_ip;
@@ -12,24 +14,59 @@ struct flow {
     void *evict_user;
 
     struct store *store;
+    struct dns_cache *dns;
     int tick_started;
     int64_t last_tick;
+    int64_t name_time;
+    int clock_set;
 };
+
+static const char *lookup_name(const struct flow *flow, const struct flow_entry *entry) {
+    if (flow_entry_name(entry)[0] != '\0') {
+        return flow_entry_name(entry);
+    }
+
+    if (flow->dns == NULL) {
+        return NULL;
+    }
+
+    const int64_t now = flow->clock_set ? flow->name_time
+                                       : flow_entry_delta(entry)->last_seen;
+
+    return dns_cache_lookup(flow->dns, flow_entry_key(entry)->remote_ip, now);
+}
+
+static int needs_flush(const struct flow *flow, const struct flow_entry *entry) {
+    const struct flow_delta *delta = flow_entry_delta(entry);
+
+    return delta->packets_out != 0 || delta->packets_in != 0 ||
+           flow_entry_name_pending(entry) ||
+           (flow_entry_name(entry)[0] == '\0' && lookup_name(flow, entry) != NULL);
+}
+
+static void snapshot_row(const struct flow *flow, const struct flow_entry *entry,
+                          struct store_row *row) {
+    row->key = *flow_entry_key(entry);
+    row->delta = *flow_entry_delta(entry);
+
+    const char *name = lookup_name(flow, entry);
+
+    if (name != NULL) {
+        memcpy(row->remote_name, name, strlen(name) + 1);
+    }
+}
 
 static int handoff_eviction(const struct flow_entry *entry, void *user) {
     const struct flow *flow = user;
 
     if (flow->store != NULL) {
-        const struct flow_delta *delta = flow_entry_delta(entry);
-
-        if (delta->packets_out == 0 && delta->packets_in == 0) {
+        if (!needs_flush(flow, entry)) {
             return 0;
         }
 
-        const struct store_row row = {
-            .key = *flow_entry_key(entry),
-            .delta = *delta
-        };
+        struct store_row row = { 0 };
+
+        snapshot_row(flow, entry, &row);
 
         if (store_flush(flow->store, &row, 1) == -1) {
             errno = EIO;
@@ -68,8 +105,11 @@ struct flow *flow_create(uint32_t local_ip, size_t bucket_count, size_t capacity
     flow->on_evict = NULL;
     flow->evict_user = NULL;
     flow->store = NULL;
+    flow->dns = NULL;
     flow->tick_started = 0;
     flow->last_tick = 0;
+    flow->name_time = 0;
+    flow->clock_set = 0;
 
     flow_table_set_eviction_handler(flow->table, handoff_eviction, flow);
 
@@ -85,7 +125,7 @@ void flow_destroy(struct flow *flow) {
     free(flow);
 }
 
-int flow_observe(const struct flow *flow, const struct packet_view *packet, int64_t now) {
+int flow_observe(struct flow *flow, const struct packet_view *packet, int64_t now) {
     if (packet->kind != PACKET_TCP && packet->kind != PACKET_UDP) {
         return 0;
     }
@@ -114,6 +154,9 @@ int flow_observe(const struct flow *flow, const struct packet_view *packet, int6
         .remote_port = outgoing ? destination_port : source_port,
         .protocol = packet->ip.protocol
     };
+
+    flow->name_time = now;
+    flow->clock_set = 1;
 
     struct flow_entry *entry = flow_table_find(flow->table, &key);
     const int is_new = entry == NULL;
@@ -154,6 +197,15 @@ int flow_observe(const struct flow *flow, const struct packet_view *packet, int6
     }
 
     flow_entry_set_delta(entry, &delta);
+
+    if (flow->dns != NULL && flow_entry_name(entry)[0] == '\0') {
+        const char *name = dns_cache_lookup(flow->dns, key.remote_ip, now);
+
+        if (name != NULL) {
+            flow_entry_set_name(entry, name);
+        }
+    }
+
     flow_table_touch(flow->table, &key);
 
     return 1;
@@ -195,9 +247,7 @@ int flow_flush(struct flow *flow) {
 
     for (const struct flow_entry *entry = flow_table_newest(flow->table);
          entry != NULL; entry = flow_entry_older(entry)) {
-        const struct flow_delta *delta = flow_entry_delta(entry);
-
-        if (delta->packets_out != 0 || delta->packets_in != 0) {
+        if (needs_flush(flow, entry)) {
             count++;
         }
     }
@@ -222,11 +272,8 @@ int flow_flush(struct flow *flow) {
 
     for (const struct flow_entry *entry = flow_table_newest(flow->table);
          entry != NULL; entry = flow_entry_older(entry)) {
-        const struct flow_delta *delta = flow_entry_delta(entry);
-
-        if (delta->packets_out != 0 || delta->packets_in != 0) {
-            rows[index].key = *flow_entry_key(entry);
-            rows[index].delta = *delta;
+        if (needs_flush(flow, entry)) {
+            snapshot_row(flow, entry, &rows[index]);
             index++;
         }
     }
@@ -248,6 +295,8 @@ int flow_flush(struct flow *flow) {
         cleared.bytes_in = 0;
 
         flow_entry_set_delta(entry, &cleared);
+        flow_entry_set_name(entry, rows[i].remote_name);
+        flow_entry_clear_name_pending(entry);
     }
 
     free(rows);
@@ -256,6 +305,9 @@ int flow_flush(struct flow *flow) {
 }
 
 int flow_tick(struct flow *flow, int64_t now) {
+    flow->name_time = now;
+    flow->clock_set = 1;
+
     if (flow->tick_started && now <= flow->last_tick) {
         return 0;
     }
@@ -284,4 +336,8 @@ int flow_tick(struct flow *flow, int64_t now) {
     }
 
     return 0;
+}
+
+void flow_set_dns_cache(struct flow *flow, struct dns_cache *cache) {
+    flow->dns = cache;
 }

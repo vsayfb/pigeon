@@ -44,11 +44,11 @@ def checksum(data):
     return ~total & 0xFFFF
 
 
-def frame(dns, reply):
+def frame(dns, reply, server_address="192.0.2.53", server_port=53):
     client = socket.inet_aton("192.0.2.10")
-    server = socket.inet_aton("192.0.2.53")
+    server = socket.inet_aton(server_address)
     src, dst = (server, client) if reply else (client, server)
-    sport, dport = (53, 49152) if reply else (49152, 53)
+    sport, dport = (server_port, 49152) if reply else (49152, server_port)
     length = 8 + len(dns)
     udp = struct.pack("!HHHH", sport, dport, length, 0) + dns
     pseudo = src + dst + struct.pack("!BBH", 0, 17, length)
@@ -66,6 +66,21 @@ def write_fixture(path, compressed):
     query = struct.pack("!HHHHHH", 0x1234, 0x0100, 1, 0, 0, 0)
     query += name("www.example.test") + struct.pack("!HH", 1, 1)
     frames = [frame(query, False), frame(response(compressed), True)]
+
+    with open(path, "wb") as out:
+        out.write(struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, 1))
+
+        for i, data in enumerate(frames):
+            out.write(struct.pack("<IIII", 1700000000 + i, 0, len(data), len(data)))
+            out.write(data)
+
+
+def write_named_flow(path, dns_first):
+    query = struct.pack("!HHHHHH", 0x1234, 0x0100, 1, 0, 0, 0)
+    query += name("www.example.test") + struct.pack("!HH", 1, 1)
+    reply = frame(response(True), True)
+    service = frame(b"x", False, "198.51.100.42", 443)
+    frames = [frame(query, False)] + ([reply, service] if dns_first else [service, reply])
 
     with open(path, "wb") as out:
         out.write(struct.pack("<IHHiIII", 0xA1B2C3D4, 2, 4, 0, 0, 65535, 1))
