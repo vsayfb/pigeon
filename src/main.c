@@ -8,6 +8,7 @@
 #include "flow/flow.h"
 #include "proto/packet.h"
 #include "proto/pktdump.h"
+#include "store/store.h"
 
 #ifndef PIGEON_VERSION
 #define PIGEON_VERSION "dev"
@@ -20,7 +21,28 @@ struct capture_context {
     int failed;
 
     struct flow *flows;
+    struct store *store;
+    int offline;
 };
+
+static void report_flow_error(struct capture_context *context) {
+    perror("flow processing");
+
+    if (context->store != NULL && store_error(context->store)[0] != '\0') {
+        fprintf(stderr, "%s\n", store_error(context->store));
+    }
+
+    context->failed = 1;
+    capture_stop();
+}
+
+static void tick_flows(int64_t now, void *user) {
+    struct capture_context *context = user;
+
+    if (!context->failed && flow_tick(context->flows, now) == -1) {
+        report_flow_error(context);
+    }
+}
 
 static void observe_frame(const uint8_t *data, const uint32_t caplen,
                           const uint32_t wirelen, int64_t timestamp, void *user) {
@@ -30,11 +52,13 @@ static void observe_frame(const uint8_t *data, const uint32_t caplen,
 
     context->count++;
 
-    if (rc == 0 && context->flows != NULL &&
+    if (context->offline && context->flows != NULL) {
+        tick_flows(timestamp, context);
+    }
+
+    if (!context->failed && rc == 0 && context->flows != NULL &&
         flow_observe(context->flows, &packet, timestamp) == -1) {
-        perror("flow observation");
-        context->failed = 1;
-        capture_stop();
+        report_flow_error(context);
     }
 
     if (context->verbose) {
@@ -49,14 +73,23 @@ static void observe_frame(const uint8_t *data, const uint32_t caplen,
 }
 
 static void print_conversation(const struct flow_entry *entry, void *user) {
-    FILE *stream = user;
+    struct capture_context *context = user;
     const struct flow_key *key = flow_entry_key(entry);
-    const struct flow_delta *delta = flow_entry_delta(entry);
+    struct store_row row;
+
+    if (store_lookup(context->store, key, &row) != 1) {
+        fprintf(stderr, "conversation lookup failed: %s\n", store_error(context->store));
+        context->failed = 1;
+
+        return;
+    }
+
+    const struct flow_delta *delta = &row.delta;
 
     char local[IPV4_STR_LEN];
     char remote[IPV4_STR_LEN];
 
-    fprintf(stream, "flow %s > %s:%u proto=%u packets_out=%" PRIu64
+    fprintf(stdout, "flow %s > %s:%u proto=%u packets_out=%" PRIu64
             " packets_in=%" PRIu64 " bytes_out=%" PRIu64 " bytes_in=%" PRIu64
             " first_seen=%" PRId64 " last_seen=%" PRId64 "\n",
             ipv4_addr_str(key->us_ip, local), ipv4_addr_str(key->remote_ip, remote),
@@ -71,10 +104,14 @@ int main(const int argc, char **argv) {
     int invalid = 0;
 
     const char *local_address = NULL;
+    const char *database_path = NULL;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--verbose") == 0) {
             context.verbose = 1;
+        } else if (strcmp(argv[i], "--db") == 0 &&
+                   database_path == NULL && i + 1 < argc) {
+            database_path = argv[++i];
         } else if (strcmp(argv[i], "--local-ip") == 0 &&
                    local_address == NULL && i + 1 < argc) {
             local_address = argv[++i];
@@ -90,9 +127,10 @@ int main(const int argc, char **argv) {
         }
     }
 
-    if (invalid || (local_address != NULL && !offline)) {
-        fprintf(stderr, "pigeon %s\nusage: %s [--verbose] [interface]\n"
-                        "       %s [--verbose] [--local-ip <IPv4>] -r <file.pcap>\n",
+    if (invalid || (local_address != NULL && !offline) ||
+        (database_path != NULL && offline && local_address == NULL)) {
+        fprintf(stderr, "pigeon %s\nusage: %s [--verbose] [--db <path>] [interface]\n"
+                        "       %s [--verbose] [--db <path>] [--local-ip <IPv4>] -r <file.pcap>\n",
                 PIGEON_VERSION, argv[0], argv[0]);
 
         return 2;
@@ -124,14 +162,33 @@ int main(const int argc, char **argv) {
         local_ip = info.local_ip;
     }
 
+    context.offline = offline;
+
     if (tracking) {
+        char error[STORE_ERROR_LEN];
+
+        if (database_path == NULL) {
+            database_path = offline ? ":memory:" : "pigeon.db";
+        }
+
+        context.store = store_open(database_path, error);
+
+        if (context.store == NULL) {
+            fprintf(stderr, "storage initialization: %s\n", error);
+
+            return 1;
+        }
+
         context.flows = flow_create(local_ip, 4096, 10000);
 
         if (context.flows == NULL) {
             perror("flow initialization");
+            store_close(context.store);
 
             return 1;
         }
+
+        flow_set_store(context.flows, context.store);
     }
 
     int rc;
@@ -146,20 +203,25 @@ int main(const int argc, char **argv) {
                 PIGEON_VERSION, info.name, ipv4_addr_str(info.local_ip, local),
                 ipv4_addr_str(info.gateway, gateway));
 
-        rc = capture_run_live(info.name, observe_frame, &context);
+        rc = capture_run_live_tick(info.name, observe_frame, tick_flows, &context);
     }
 
     fprintf(stderr, "pigeon stopped after %lu packets\n", context.count);
 
     if (context.flows != NULL) {
+        if (flow_flush(context.flows) == -1) {
+            report_flow_error(&context);
+        }
+
         fprintf(stderr, "pigeon tracked %zu conversations\n", flow_count(context.flows));
 
-        if (context.verbose) {
-            flow_visit(context.flows, print_conversation, stdout);
+        if (context.verbose && !context.failed) {
+            flow_visit(context.flows, print_conversation, &context);
         }
     }
 
     flow_destroy(context.flows);
+    store_close(context.store);
 
     return rc == 0 && !context.failed ? 0 : 1;
 }

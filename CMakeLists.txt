@@ -99,3 +99,23 @@ add_test(NAME flow COMMAND test_flow)
 add_executable(test_store tests/unit/test_store.c)
 target_link_libraries(test_store PRIVATE pigeon_core)
 add_test(NAME store COMMAND test_store)
+
+add_executable(test_flow_flush tests/unit/test_flow_flush.c)
+target_link_libraries(test_flow_flush PRIVATE pigeon_core)
+add_test(NAME flow_flush COMMAND test_flow_flush)
+
+add_executable(test_replay_store tests/integration/test_replay_store.c)
+target_link_libraries(test_replay_store PRIVATE pigeon_core)
+add_test(NAME replay_store COMMAND test_replay_store $<TARGET_FILE:pigeon>
+        ${CMAKE_SOURCE_DIR}/tests/fixtures/short_frames.pcap)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(test_capture_tick tests/unit/test_capture_tick.c)
+    target_link_libraries(test_capture_tick PRIVATE pigeon_core)
+    target_link_options(test_capture_tick PRIVATE
+            -Wl,--wrap=pcap_open_live -Wl,--wrap=pcap_datalink
+            -Wl,--wrap=pcap_get_selectable_fd -Wl,--wrap=pcap_setnonblock
+            -Wl,--wrap=pcap_dispatch -Wl,--wrap=pcap_breakloop
+            -Wl,--wrap=pcap_close -Wl,--wrap=poll -Wl,--wrap=time)
+    add_test(NAME capture_tick COMMAND test_capture_tick)
+endif()

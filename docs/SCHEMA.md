@@ -62,6 +62,15 @@ borrowing statement memory.
 
 A successful flush does not clear its input deltas. The caller must clear them
 only after success; submitting the same successful batch again adds it again.
-Flush scheduling, eviction handoff to storage, shutdown flush, and capture
-wiring are not implemented in this module's commit. The application still
-holds its current traffic totals only in memory.
+Flow tracking now flushes pending deltas periodically, before capacity eviction,
+and on shutdown. Periodic flushes are throttled to one attempt per second;
+explicit and capacity flushes bypass this throttle. UDP entries expire after
+30 idle seconds and TCP entries after 120, following a successful flush.
+Deltas are cleared only after commit. Failed writes preserve pending deltas
+and prevent expiry or eviction; the executable stops capture and returns an
+error if writing fails. It attempts a final flush before teardown.
+
+Live capture defaults to `pigeon.db`; `--db` selects another path. Replay with
+`--local-ip` defaults to an in-memory database unless `--db` is specified.
+Verbose shutdown output shows stored totals for entries still active in memory.
+Expired and evicted entries remain queryable in SQLite.

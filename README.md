@@ -35,12 +35,23 @@ Ethernet, IPv4, TCP and UDP parsing is separate from printing. Unsupported
 protocols and later IP fragments retain only their decoded enclosing headers.
 Malformed or truncated supported headers are reported in verbose mode.
 
-Flow tracking is connected to live capture. Each parsed TCP/UDP packet updates
-its remote conversation using capture timestamps. Verbose mode prints pending
-conversation totals on shutdown; totals are currently held only in memory.
-The table has 4,096 buckets and a capacity of 10,000 conversations. Until a
-storage handler is connected, reaching capacity with a new conversation stops
-capture and returns an error instead of evicting unconsumed counters.
+Flow tracking is connected to live capture and SQLite. Each parsed TCP/UDP
+packet updates its remote conversation using capture timestamps. Live capture
+writes to `pigeon.db` in the current directory; select a different path with
+`--db <path>`.
+
+Pending deltas flush in one transaction at most once per second during periodic
+maintenance. UDP conversations expire after 30 idle seconds and TCP after 120.
+Capacity eviction writes the oldest conversation before freeing it. Shutdown
+forces a final flush, including on SIGINT and SIGTERM. Forced shutdown and
+capacity flushes bypass the periodic throttle. Successful writes clear only
+pending counters; failed writes retain them and stop capture with an error.
+
+The table has 4,096 buckets and a capacity of 10,000 conversations. Live
+maintenance also runs while capture is idle. Verbose mode prints stored totals
+for conversations still active at shutdown; expired or evicted conversations
+remain in the database. There is no durable queue for deltas that could not be
+written before the process exits.
 
 To track conversations during replay, supply the local address from the file:
 
@@ -48,11 +59,17 @@ To track conversations during replay, supply the local address from the file:
 ./build/pigeon --verbose --local-ip 192.0.2.10 -r tests/fixtures/short_frames.pcap
 ```
 
-Without `--local-ip`, offline replay retains packet inspection only.
-The option is only accepted with `-r`; live capture uses the discovered address.
+Replay tracking uses an in-memory database by default. To keep its totals:
 
-The SQLite storage module is implemented and tested independently; it is not
-connected to capture yet. It adds batched conversation deltas transactionally
-and preserves totals across database reopen. See [docs/SCHEMA.md](docs/SCHEMA.md)
-for the schema and write semantics. On Debian/Ubuntu its build dependency is
-`libsqlite3-dev` alongside `libpcap-dev`.
+```sh
+./build/pigeon --local-ip 192.0.2.10 --db replay.db -r tests/fixtures/short_frames.pcap
+```
+
+Replaying the same file into the same database adds its traffic again. Without
+`--local-ip`, replay performs packet inspection only; `--db` requires replay
+tracking. The local-IP option is only accepted with `-r`; live capture uses the
+discovered address. Replay maintenance follows packet timestamps, without
+waiting for wall-clock time.
+
+The build requires `libsqlite3-dev` and `libpcap-dev` on Debian/Ubuntu.
+See [docs/SCHEMA.md](docs/SCHEMA.md) for the schema and write semantics.

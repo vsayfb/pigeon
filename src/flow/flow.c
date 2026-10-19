@@ -1,4 +1,5 @@
 #include "flow/flow.h"
+#include "store/store.h"
 
 #include <errno.h>
 #include <stdlib.h>
@@ -9,10 +10,35 @@ struct flow {
 
     flow_evict_cb on_evict;
     void *evict_user;
+
+    struct store *store;
+    int tick_started;
+    int64_t last_tick;
 };
 
 static int handoff_eviction(const struct flow_entry *entry, void *user) {
     const struct flow *flow = user;
+
+    if (flow->store != NULL) {
+        const struct flow_delta *delta = flow_entry_delta(entry);
+
+        if (delta->packets_out == 0 && delta->packets_in == 0) {
+            return 0;
+        }
+
+        const struct store_row row = {
+            .key = *flow_entry_key(entry),
+            .delta = *delta
+        };
+
+        if (store_flush(flow->store, &row, 1) == -1) {
+            errno = EIO;
+
+            return -1;
+        }
+
+        return 0;
+    }
 
     if (flow->on_evict == NULL) {
         errno = ENOSPC;
@@ -41,6 +67,9 @@ struct flow *flow_create(uint32_t local_ip, size_t bucket_count, size_t capacity
     flow->local_ip = local_ip;
     flow->on_evict = NULL;
     flow->evict_user = NULL;
+    flow->store = NULL;
+    flow->tick_started = 0;
+    flow->last_tick = 0;
 
     flow_table_set_eviction_handler(flow->table, handoff_eviction, flow);
 
@@ -149,4 +178,110 @@ void flow_visit(const struct flow *flow,
          entry != NULL; entry = flow_entry_older(entry)) {
         visit(entry, user);
     }
+}
+
+void flow_set_store(struct flow *flow, struct store *store) {
+    flow->store = store;
+}
+
+int flow_flush(struct flow *flow) {
+    if (flow->store == NULL) {
+        errno = ENOSYS;
+
+        return -1;
+    }
+
+    size_t count = 0;
+
+    for (const struct flow_entry *entry = flow_table_newest(flow->table);
+         entry != NULL; entry = flow_entry_older(entry)) {
+        const struct flow_delta *delta = flow_entry_delta(entry);
+
+        if (delta->packets_out != 0 || delta->packets_in != 0) {
+            count++;
+        }
+    }
+
+    if (count == 0) {
+        return 0;
+    }
+
+    if (count > SIZE_MAX / sizeof(struct store_row)) {
+        errno = ENOMEM;
+
+        return -1;
+    }
+
+    struct store_row *rows = calloc(count, sizeof *rows);
+
+    if (rows == NULL) {
+        return -1;
+    }
+
+    size_t index = 0;
+
+    for (const struct flow_entry *entry = flow_table_newest(flow->table);
+         entry != NULL; entry = flow_entry_older(entry)) {
+        const struct flow_delta *delta = flow_entry_delta(entry);
+
+        if (delta->packets_out != 0 || delta->packets_in != 0) {
+            rows[index].key = *flow_entry_key(entry);
+            rows[index].delta = *delta;
+            index++;
+        }
+    }
+
+    if (store_flush(flow->store, rows, count) == -1) {
+        free(rows);
+        errno = EIO;
+
+        return -1;
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        struct flow_entry *entry = flow_table_find(flow->table, &rows[i].key);
+        struct flow_delta cleared = rows[i].delta;
+
+        cleared.packets_out = 0;
+        cleared.packets_in = 0;
+        cleared.bytes_out = 0;
+        cleared.bytes_in = 0;
+
+        flow_entry_set_delta(entry, &cleared);
+    }
+
+    free(rows);
+
+    return 0;
+}
+
+int flow_tick(struct flow *flow, int64_t now) {
+    if (flow->tick_started && now <= flow->last_tick) {
+        return 0;
+    }
+
+    flow->tick_started = 1;
+    flow->last_tick = now;
+
+    if (flow_flush(flow) == -1) {
+        return -1;
+    }
+
+    const struct flow_entry *entry = flow_table_oldest(flow->table);
+
+    while (entry != NULL) {
+        const struct flow_entry *next = flow_entry_newer(entry);
+        const struct flow_delta *delta = flow_entry_delta(entry);
+        const struct flow_key *key = flow_entry_key(entry);
+        const uint64_t idle = key->protocol == IP_PROTO_UDP ? 30 : 120;
+
+        if (now >= delta->last_seen &&
+            (uint64_t)now - (uint64_t)delta->last_seen >= idle) {
+            flow_table_remove(flow->table, key);
+        }
+
+        entry = next;
+    }
+
+    return 0;
 }

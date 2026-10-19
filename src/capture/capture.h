@@ -36,6 +36,15 @@ int capture_run_live(const char *ifname, capture_cb cb, void *user);
  */
 int capture_run_file(const char *path, capture_cb cb, void *user);
 
+/* Called during live capture, including idle periods, with current Unix
+ * seconds. Runs on the capture thread and may call capture_stop(). */
+typedef void (*capture_tick_cb)(int64_t now, void *user);
+
+/* Same ownership and return semantics as capture_run_live(), with periodic
+ * ticks at roughly one-second intervals while idle. Requires a selectable
+ * capture descriptor. NULL tick preserves capture_run_live() behavior. */
+int capture_run_live_tick(const char *ifname, capture_cb cb, capture_tick_cb tick, void *user);
+
 /* Requests termination of the current capture loop. Intended for callbacks;
  * has no effect when no capture is running. */
 void capture_stop(void);

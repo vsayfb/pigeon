@@ -1,0 +1,80 @@
+#include <fcntl.h>
+#include <stdlib.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include "../t.h"
+#include "store/store.h"
+
+static void run_replay(const char *program, const char *fixture, const char *database) {
+    const pid_t child = fork();
+
+    CHECK(child != -1);
+
+    if (child == 0) {
+        const int output = open("/dev/null", O_WRONLY);
+
+        if (output == -1 || dup2(output, STDOUT_FILENO) == -1) {
+            _exit(126);
+        }
+
+        close(output);
+        execl(program, program, "--local-ip", "192.0.2.10", "--db", database,
+              "-r", fixture, (char *)NULL);
+        _exit(127);
+    }
+
+    int status;
+
+    CHECK(waitpid(child, &status, 0) == child);
+    CHECK(WIFEXITED(status));
+    CHECK(WEXITSTATUS(status) == 0);
+}
+
+int main(int argc, char **argv) {
+    CHECK(argc == 3);
+
+    char path[] = "/tmp/pigeon-replay-XXXXXX";
+    const int fd = mkstemp(path);
+
+    CHECK(fd != -1);
+    CHECK(close(fd) == 0);
+
+    for (unsigned run = 1; run <= 2; run++) {
+        run_replay(argv[1], argv[2], path);
+
+        char error[STORE_ERROR_LEN];
+        struct store *store = store_open(path, error);
+        struct store_row row;
+        struct flow_key key = {
+            .us_ip = 0xC000020A, .remote_ip = 0xC6336414,
+            .remote_port = 80, .protocol = 6
+        };
+
+        CHECK(store != NULL);
+        CHECK(store_lookup(store, &key, &row) == 1);
+        CHECK(row.delta.packets_out == 2 * run);
+        CHECK(row.delta.packets_in == run);
+        CHECK(row.delta.bytes_out == run);
+        CHECK(row.delta.bytes_in == 0);
+        CHECK(row.delta.first_seen == 1700000000);
+        CHECK(row.delta.last_seen == 1700000000);
+
+        key.remote_port = 9999;
+        key.protocol = 17;
+
+        CHECK(store_lookup(store, &key, &row) == 1);
+        CHECK(row.delta.packets_out == run);
+        CHECK(row.delta.packets_in == 0);
+        CHECK(row.delta.bytes_out == run);
+        CHECK(row.delta.bytes_in == 0);
+
+        store_close(store);
+    }
+
+    CHECK(unlink(path) == 0);
+
+    puts("replay_store: ok");
+
+    return 0;
+}
