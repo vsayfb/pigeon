@@ -3,13 +3,14 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include "proto/address.h"
 
 #define DNS_NAME_LEN 254
 #define DNS_MAX_QUESTIONS 16
 #define DNS_MAX_ANSWERS 64
 
 struct dns_answer {
-    uint32_t ip;               /* host byte order */
+    struct ip_addr ip;
     uint32_t ttl;              /* seconds, minimum across the CNAME chain */
     char name[DNS_NAME_LEN];   /* lowercase ASCII, no trailing dot */
 };
@@ -21,9 +22,9 @@ enum dns_parse_status {
 };
 
 /*
- * Decodes IN-class A records from a DNS response's answer section. data is
+ * Decodes IN-class A/AAAA records from a DNS response's answer section. data is
  * the DNS message itself, without UDP headers; len is its readable length.
- * CNAME chains select the matching question's name, or the A record owner
+ * CNAME chains select the matching question's name, or the address record owner
  * when no question matches. Authority/additional sections are not inspected.
  * Queries, nonstandard opcodes and nonzero response codes yield no results.
  * Names use printable ASCII labels excluding literal dot and backslash;

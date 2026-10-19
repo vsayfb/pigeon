@@ -15,18 +15,28 @@ void pktdump(FILE *stream, const struct packet_view *packet) {
         return;
     }
 
-    const struct ipv4_view *ip = &packet->ip;
+    char src[IP_ADDR_STR_LEN];
+    char dst[IP_ADDR_STR_LEN];
+    uint16_t fragment;
 
-    char src[IPV4_STR_LEN];
-    char dst[IPV4_STR_LEN];
+    if (packet->eth.ethertype == ETHERTYPE_IPV6) {
+        const struct ipv6_view *ip = &packet->ip6;
 
-    fprintf(stream, "    IPv4 %s > %s proto=%u hdr=%u total=%u payload=%zu\n",
-            ipv4_addr_str(ip->src, src), ipv4_addr_str(ip->dst, dst),
-            ip->protocol, ip->header_len, ip->total_len, ip->payload_len);
+        fragment = ip->frag_offset;
+        fprintf(stream, "    IPv6 %s > %s proto=%u hdr=%zu total=%u payload=%zu\n",
+                ip_addr_str(&ip->src, src), ip_addr_str(&ip->dst, dst),
+                ip->protocol, ip->header_len, ip->total_len, ip->payload_len);
+    } else {
+        const struct ipv4_view *ip = &packet->ip;
 
-    if (ip->frag_offset != 0) {
-        fprintf(stream, "    fragment at offset %u, no transport header\n",
-                ip->frag_offset);
+        fragment = ip->frag_offset;
+        fprintf(stream, "    IPv4 %s > %s proto=%u hdr=%u total=%u payload=%zu\n",
+                ipv4_addr_str(ip->src, src), ipv4_addr_str(ip->dst, dst),
+                ip->protocol, ip->header_len, ip->total_len, ip->payload_len);
+    }
+
+    if (fragment != 0) {
+        fprintf(stream, "    fragment at offset %u, no transport header\n", fragment);
     } else if (packet->kind == PACKET_TCP) {
         const struct tcp_view *tcp = &packet->transport.tcp;
 

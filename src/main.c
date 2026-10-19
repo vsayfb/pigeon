@@ -25,7 +25,8 @@ struct capture_context {
     struct flow *flows;
     struct store *store;
     int offline;
-    uint32_t local_ip;
+    struct ip_addr locals[64];
+    size_t local_count;
     struct dns_cache *dns;
 };
 
@@ -61,7 +62,7 @@ static void observe_frame(const uint8_t *data, const uint32_t caplen,
     context->count++;
 
     if (!context->failed && rc == 0 && context->dns != NULL &&
-        dns_cache_observe(context->dns, &packet, context->local_ip, timestamp) == -1) {
+        dns_cache_observe_addresses(context->dns, &packet, context->locals, context->local_count, timestamp) == -1) {
         report_flow_error(context);
     }
 
@@ -99,13 +100,17 @@ static void print_conversation(const struct flow_entry *entry, void *user) {
 
     const struct flow_delta *delta = &row.delta;
 
-    char local[IPV4_STR_LEN];
-    char remote[IPV4_STR_LEN];
+    char local[IP_ADDR_STR_LEN];
+    char remote[IP_ADDR_STR_LEN];
+    char endpoint[IP_ADDR_STR_LEN + 2];
+
+    ip_addr_str(&key->remote_ip, remote);
+    snprintf(endpoint, sizeof endpoint, key->remote_ip.family == 6 ? "[%s]" : "%s", remote);
 
     fprintf(stdout, "flow %s > %s:%u proto=%u packets_out=%" PRIu64
             " packets_in=%" PRIu64 " bytes_out=%" PRIu64 " bytes_in=%" PRIu64
             " first_seen=%" PRId64 " last_seen=%" PRId64 " name=%s\n",
-            ipv4_addr_str(key->us_ip, local), ipv4_addr_str(key->remote_ip, remote),
+            ip_addr_str(&key->us_ip, local), endpoint,
             key->remote_port, key->protocol, delta->packets_out, delta->packets_in,
             delta->bytes_out, delta->bytes_in, delta->first_seen, delta->last_seen,
             row.remote_name[0] != '\0' ? row.remote_name : "-");
@@ -117,7 +122,8 @@ int main(const int argc, char **argv) {
     int offline = 0;
     int invalid = 0;
 
-    const char *local_address = NULL;
+    const char *local_addresses[64];
+    size_t local_count = 0;
     const char *database_path = NULL;
 
     for (int i = 1; i < argc; i++) {
@@ -127,8 +133,8 @@ int main(const int argc, char **argv) {
                    database_path == NULL && i + 1 < argc) {
             database_path = argv[++i];
         } else if (strcmp(argv[i], "--local-ip") == 0 &&
-                   local_address == NULL && i + 1 < argc) {
-            local_address = argv[++i];
+                   local_count < 64 && i + 1 < argc) {
+            local_addresses[local_count++] = argv[++i];
         } else if (strcmp(argv[i], "-r") == 0 && source == NULL && i + 1 < argc) {
             offline = 1;
             source = argv[++i];
@@ -141,43 +147,38 @@ int main(const int argc, char **argv) {
         }
     }
 
-    if (invalid || (local_address != NULL && !offline) ||
-        (database_path != NULL && offline && local_address == NULL)) {
+    if (invalid || (local_count != 0 && !offline) ||
+        (database_path != NULL && offline && local_count == 0)) {
         fprintf(stderr, "pigeon %s\nusage: %s [--verbose] [--db <path>] [interface]\n"
-                        "       %s [--verbose] [--db <path>] [--local-ip <IPv4>] -r <file.pcap>\n",
+                        "       %s [--verbose] [--db <path>] [--local-ip <IP> ...] -r <file.pcap>\n",
                 PIGEON_VERSION, argv[0], argv[0]);
 
         return 2;
     }
 
     struct netif_info info = { 0 };
-    uint32_t local_ip = 0;
-    const int tracking = !offline || local_address != NULL;
+    const int tracking = !offline || local_count != 0;
 
     if (offline) {
-        if (local_address != NULL) {
-            struct in_addr address;
-
-            if (inet_pton(AF_INET, local_address, &address) != 1) {
-                fprintf(stderr, "invalid local IPv4 address: %s\n", local_address);
+        for (size_t i = 0; i < local_count; i++) {
+            if (ip_addr_parse(local_addresses[i], &context.locals[i]) == -1) {
+                fprintf(stderr, "invalid local IPv4/IPv6 address: %s\n", local_addresses[i]);
 
                 return 2;
             }
-
-            local_ip = ntohl(address.s_addr);
         }
+
+        context.local_count = local_count;
     } else {
-        if (netif_lookup_on(0x01010101, source, &info) == -1) {
+        if (netif_select(source, &info) == -1 ||
+            netif_addresses(info.name, context.locals, 64, &context.local_count) == -1) {
             perror("interface discovery");
 
             return 1;
         }
-
-        local_ip = info.local_ip;
     }
 
     context.offline = offline;
-    context.local_ip = local_ip;
 
     if (tracking) {
         char error[STORE_ERROR_LEN];
@@ -194,7 +195,7 @@ int main(const int argc, char **argv) {
             return 1;
         }
 
-        context.flows = flow_create(local_ip, 4096, 10000);
+        context.flows = flow_create_addresses(context.locals, context.local_count, 4096, 10000);
 
         if (context.flows == NULL) {
             perror("flow initialization");
@@ -233,12 +234,19 @@ int main(const int argc, char **argv) {
     if (offline) {
         rc = capture_run_file(source, observe_frame, &context);
     } else {
-        char local[IPV4_STR_LEN];
-        char gateway[IPV4_STR_LEN];
+        fprintf(stderr, "pigeon %s capturing on %s\n", PIGEON_VERSION, info.name);
 
-        fprintf(stderr, "pigeon %s capturing on %s local=%s gateway=%s\n",
-                PIGEON_VERSION, info.name, ipv4_addr_str(info.local_ip, local),
-                ipv4_addr_str(info.gateway, gateway));
+        if (info.gateway != 0) {
+            char gateway[IPV4_STR_LEN];
+
+            fprintf(stderr, "    IPv4 gateway %s\n", ipv4_addr_str(info.gateway, gateway));
+        }
+
+        for (size_t i = 0; i < context.local_count; i++) {
+            char address[IP_ADDR_STR_LEN];
+
+            fprintf(stderr, "    local address %s\n", ip_addr_str(&context.locals[i], address));
+        }
 
         rc = capture_run_live_tick(info.name, observe_frame, tick_flows, &context);
     }

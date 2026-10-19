@@ -6,6 +6,7 @@
 
 #define DNS_HEADER_LEN 12
 #define DNS_TYPE_A 1
+#define DNS_TYPE_AAAA 28
 #define DNS_TYPE_CNAME 5
 #define DNS_CLASS_IN 1
 #define DNS_NAME_STEPS 128
@@ -21,7 +22,7 @@ struct record {
     char owner[DNS_NAME_LEN];
     char target[DNS_NAME_LEN];
     uint16_t type;
-    uint32_t ip;
+    struct ip_addr ip;
     uint32_t ttl;
 };
 
@@ -187,7 +188,7 @@ static int emit_answers(const struct record *records, size_t record_count,
     }
 
     for (size_t i = 0; i < record_count; i++) {
-        if (records[i].type != DNS_TYPE_A) {
+        if (records[i].type != DNS_TYPE_A && records[i].type != DNS_TYPE_AAAA) {
             continue;
         }
 
@@ -196,7 +197,7 @@ static int emit_answers(const struct record *records, size_t record_count,
 
         for (size_t q = 0; q < question_count; q++) {
             if (questions[q].class == DNS_CLASS_IN &&
-                (questions[q].type == DNS_TYPE_A || questions[q].type == 255) &&
+                (questions[q].type == records[i].type || questions[q].type == 255) &&
                 resolved[q] != NULL && strcmp(resolved[q], records[i].owner) == 0) {
                 name = questions[q].name;
                 answer.ttl = minimum(answer.ttl, ttls[q]);
@@ -297,13 +298,16 @@ int dns_parse_response(const uint8_t *data, size_t len,
             break;
         }
 
-        if (class == DNS_CLASS_IN && record.type == DNS_TYPE_A) {
-            if (rdlength != 4) {
+        if (class == DNS_CLASS_IN && (record.type == DNS_TYPE_A || record.type == DNS_TYPE_AAAA)) {
+            const size_t address_len = record.type == DNS_TYPE_A ? 4 : 16;
+
+            if (rdlength != address_len) {
                 status = DNS_PARSE_INVALID;
                 break;
             }
 
-            record.ip = be32(data + offset);
+            record.ip.family = record.type == DNS_TYPE_A ? 4 : 6;
+            memcpy(record.ip.bytes, data + offset, address_len);
             records[record_count++] = record;
         } else if (class == DNS_CLASS_IN && record.type == DNS_TYPE_CNAME) {
             const int name_rc = decode_name(data, len, offset, offset + rdlength,

@@ -59,6 +59,22 @@ static int scalar(struct store *store, const char *sql, int *value) {
     return rc;
 }
 
+static void migrate_ipv4(sqlite3_context *context, int count, sqlite3_value **values) {
+    (void)count;
+
+    const sqlite3_int64 value = sqlite3_value_int64(values[0]);
+
+    if (sqlite3_value_type(values[0]) != SQLITE_INTEGER || value < 0 || value > UINT32_MAX) {
+        sqlite3_result_error(context, "invalid IPv4 value in migration", -1);
+
+        return;
+    }
+
+    const struct ip_addr address = ip_addr_v4((uint32_t)value);
+
+    sqlite3_result_blob(context, address.bytes, 4, SQLITE_TRANSIENT);
+}
+
 static int initialize_schema(struct store *store) {
     if (execute(store, "BEGIN IMMEDIATE") == -1) {
         return -1;
@@ -87,8 +103,18 @@ static int initialize_schema(struct store *store) {
         if (execute(store, STORE_SCHEMA_SQL) == -1) {
             goto error;
         }
-    } else if (version == 1) {
-        if (execute(store, STORE_DNS_SCHEMA_SQL) == -1) {
+    } else if (version == 1 || version == 2) {
+        if (version == 1 && execute(store, STORE_DNS_V2_SQL) == -1) {
+            goto error;
+        }
+
+        if (sqlite3_create_function_v2(store->db, "ipv4_blob", 1, SQLITE_UTF8,
+                                       NULL, migrate_ipv4, NULL, NULL, NULL) != SQLITE_OK) {
+            fail(store, "register IPv4 migration");
+            goto error;
+        }
+
+        if (execute(store, STORE_MIGRATE_V2_SQL) == -1) {
             goto error;
         }
     } else if (version != SCHEMA_VERSION) {
@@ -198,11 +224,35 @@ void store_close(struct store *store) {
     free(store);
 }
 
+static int bind_address(sqlite3_stmt *statement, int index, const struct ip_addr *address) {
+    const size_t size = ip_addr_size(address);
+
+    if (size == 0) {
+        return SQLITE_MISMATCH;
+    }
+
+    return sqlite3_bind_blob(statement, index, address->bytes, (int)size, SQLITE_TRANSIENT);
+}
+
+static int read_address(sqlite3_stmt *statement, int column, struct ip_addr *address) {
+    const int size = sqlite3_column_bytes(statement, column);
+    const void *bytes = sqlite3_column_blob(statement, column);
+
+    if (bytes == NULL || (size != 4 && size != 16)) {
+        return -1;
+    }
+
+    address->family = size == 4 ? 4 : 6;
+    memcpy(address->bytes, bytes, (size_t)size);
+
+    return 0;
+}
+
 static int bind_key(sqlite3_stmt *statement, const struct flow_key *key) {
-    int rc = sqlite3_bind_int64(statement, 1, key->us_ip);
+    int rc = bind_address(statement, 1, &key->us_ip);
 
     if (rc == SQLITE_OK) {
-        rc = sqlite3_bind_int64(statement, 2, key->remote_ip);
+        rc = bind_address(statement, 2, &key->remote_ip);
     }
 
     if (rc == SQLITE_OK) {
@@ -368,7 +418,7 @@ int store_dns_save(struct store *store, const struct store_dns_row *row) {
         return -1;
     }
 
-    int rc = sqlite3_bind_int64(store->dns_save, 1, row->ip);
+    int rc = bind_address(store->dns_save, 1, &row->ip);
 
     if (rc == SQLITE_OK) {
         rc = sqlite3_bind_text(store->dns_save, 2, row->name, -1, SQLITE_TRANSIENT);
@@ -413,10 +463,15 @@ int store_dns_load(struct store *store, int64_t now,
 
     while ((rc = sqlite3_step(store->dns_load)) == SQLITE_ROW) {
         struct store_dns_row row = {
-            .ip = (uint32_t)sqlite3_column_int64(store->dns_load, 0),
             .observed_at = sqlite3_column_int64(store->dns_load, 2),
             .expires_at = sqlite3_column_int64(store->dns_load, 3)
         };
+
+        if (read_address(store->dns_load, 0, &row.ip) == -1) {
+            snprintf(store->error, sizeof store->error, "invalid stored DNS address");
+            result = -1;
+            break;
+        }
 
         const char *name = (const char *)sqlite3_column_text(store->dns_load, 1);
         const int bytes = sqlite3_column_bytes(store->dns_load, 1);

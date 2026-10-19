@@ -5,12 +5,13 @@
 
 #include "../t.h"
 #include "store/store.h"
+#include "store/schema.h"
 
 static struct store_row make_row(uint16_t port) {
     const struct store_row row = {
         .key = {
-            .us_ip = 0xC000020A,
-            .remote_ip = 0xC6336414,
+            .us_ip = ip_addr_v4(0xC000020A),
+            .remote_ip = ip_addr_v4(0xC6336414),
             .remote_port = port,
             .protocol = 6
         },
@@ -78,8 +79,8 @@ static void test_names_and_independent_keys(void) {
         rows[i] = make_row(443);
     }
 
-    rows[1].key.us_ip++;
-    rows[2].key.remote_ip++;
+    rows[1].key.us_ip.bytes[3]++;
+    rows[2].key.remote_ip.bytes[3]++;
     rows[3].key.remote_port++;
     rows[4].key.protocol = 17;
 
@@ -149,11 +150,11 @@ static void test_ranges_and_validation(void) {
     struct store_row found;
 
     row.delta.bytes_out = INT64_MAX;
-    row.key.us_ip = UINT32_MAX;
+    row.key.us_ip = ip_addr_v4(UINT32_MAX);
 
     CHECK(store_flush(store, &row, 1) == 0);
     CHECK(store_lookup(store, &row.key, &found) == 1);
-    CHECK(found.key.us_ip == UINT32_MAX);
+    CHECK(ip_addr_v4_value(&found.key.us_ip) == UINT32_MAX);
     CHECK(found.delta.bytes_out == INT64_MAX);
 
     row.delta.bytes_out = 1;
@@ -250,7 +251,7 @@ static void test_file_reopen_wal_and_schema_versions(void) {
     sqlite3_stmt *statement = NULL;
 
     CHECK(sqlite3_open(path, &db) == SQLITE_OK);
-    CHECK(read_scalar(db, "PRAGMA user_version") == 2);
+    CHECK(read_scalar(db, "PRAGMA user_version") == 3);
     CHECK(sqlite3_prepare_v2(db, "PRAGMA journal_mode", -1, &statement, NULL) == SQLITE_OK);
     CHECK(sqlite3_step(statement) == SQLITE_ROW);
     CHECK(strcmp((const char *)sqlite3_column_text(statement, 0), "wal") == 0);
@@ -293,6 +294,92 @@ static void test_open_failure(void) {
     CHECK(rmdir(path) == 0);
 }
 
+static int count_dns(const struct store_dns_row *row, void *user) {
+    unsigned *count = user;
+
+    CHECK(row->ip.family == 4 || row->ip.family == 6);
+    CHECK(strcmp(row->name, "old.test") == 0 || strcmp(row->name, "ipv6.test") == 0);
+
+    (*count)++;
+
+    return 0;
+}
+
+static void test_version_two_migration(void) {
+    char path[] = "/tmp/pigeon-store-v2-XXXXXX";
+    const int fd = mkstemp(path);
+    sqlite3 *db = NULL;
+    char error[STORE_ERROR_LEN];
+
+    CHECK(fd != -1);
+    CHECK(close(fd) == 0);
+    CHECK(sqlite3_open(path, &db) == SQLITE_OK);
+    CHECK(sqlite3_exec(db, STORE_CONVERSATIONS_V2_SQL STORE_DNS_V2_SQL
+                      "INSERT INTO conversations VALUES(3221225994,3325256746,443,6,"
+                      "3,2,100,200,100,110,'old.test');"
+                      "INSERT INTO dns_cache VALUES(3325256746,'old.test',100,200);"
+                      "DROP INDEX dns_cache_expiry;", NULL, NULL, NULL) == SQLITE_OK);
+
+    /* A failed migration restores the version, integer rows and table names. */
+    CHECK(store_open(path, error) == NULL);
+    CHECK(read_scalar(db, "PRAGMA user_version") == 2);
+    CHECK(read_scalar(db, "SELECT typeof(us_ip)='integer' FROM conversations") == 1);
+    CHECK(sqlite3_exec(db, "CREATE INDEX dns_cache_expiry ON dns_cache(expires_at)",
+                      NULL, NULL, NULL) == SQLITE_OK);
+
+    struct store *store = store_open(path, error);
+    struct store_row row;
+    struct flow_key key = {
+        .us_ip = ip_addr_v4(0xC000020A), .remote_ip = ip_addr_v4(0xC633642A),
+        .remote_port = 443, .protocol = 6
+    };
+
+    CHECK(store != NULL);
+    CHECK(read_scalar(db, "PRAGMA user_version") == 3);
+    CHECK(store_lookup(store, &key, &row) == 1);
+    CHECK(row.delta.bytes_out == 100);
+    CHECK(row.delta.packets_in == 2);
+    CHECK(strcmp(row.remote_name, "old.test") == 0);
+    CHECK(read_scalar(db, "SELECT length(us_ip) FROM conversations") == 4);
+
+    unsigned dns_count = 0;
+
+    CHECK(store_dns_load(store, 110, count_dns, &dns_count) == 0);
+    CHECK(dns_count == 1);
+
+    CHECK(ip_addr_parse("2001:db8::10", &row.key.us_ip) == 0);
+    CHECK(ip_addr_parse("2001:db8::42", &row.key.remote_ip) == 0);
+
+    row.remote_name[0] = '\0';
+
+    CHECK(store_flush(store, &row, 1) == 0);
+    CHECK(read_scalar(db, "SELECT count(*) FROM conversations") == 2);
+
+    struct store_dns_row mapping = { .observed_at = 110, .expires_at = 200,
+                                      .name = "ipv6.test" };
+
+    CHECK(ip_addr_parse("2001:db8::42", &mapping.ip) == 0);
+    CHECK(store_dns_save(store, &mapping) == 1);
+
+    dns_count = 0;
+
+    CHECK(store_dns_load(store, 110, count_dns, &dns_count) == 0);
+    CHECK(dns_count == 2);
+
+    store_close(store);
+
+    store = store_open(path, error);
+
+    CHECK(store != NULL);
+    CHECK(store_lookup(store, &row.key, &row) == 1);
+    CHECK(row.delta.bytes_out == 100);
+
+    store_close(store);
+
+    CHECK(sqlite3_close(db) == SQLITE_OK);
+    CHECK(unlink(path) == 0);
+}
+
 int main(void) {
     test_totals_and_timestamps();
     test_names_and_independent_keys();
@@ -301,6 +388,7 @@ int main(void) {
     test_empty_and_output_ownership();
     test_file_reopen_wal_and_schema_versions();
     test_open_failure();
+    test_version_two_migration();
 
     puts("store: ok");
 

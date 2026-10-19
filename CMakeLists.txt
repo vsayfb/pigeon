@@ -25,6 +25,8 @@ add_library(pigeon_core STATIC
         src/capture/capture.c
         src/proto/ethernet.c
         src/proto/ipv4.c
+        src/proto/ipv6.c
+        src/proto/address.c
         src/proto/transport.c
         src/proto/packet.c
         src/proto/pktdump.c
@@ -111,7 +113,8 @@ target_link_libraries(test_replay_store PRIVATE pigeon_core)
 add_test(NAME replay_store COMMAND test_replay_store $<TARGET_FILE:pigeon>
         ${CMAKE_SOURCE_DIR}/tests/fixtures/short_frames.pcap
         ${CMAKE_SOURCE_DIR}/tests/fixtures/dns_before_flow.pcap
-        ${CMAKE_SOURCE_DIR}/tests/fixtures/flow_before_dns.pcap)
+        ${CMAKE_SOURCE_DIR}/tests/fixtures/flow_before_dns.pcap
+        ${CMAKE_SOURCE_DIR}/tests/fixtures/ipv6_conversations.pcap)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(test_capture_tick tests/unit/test_capture_tick.c)
@@ -136,3 +139,18 @@ target_link_libraries(fuzz_dns_parse PRIVATE pigeon_core)
 add_executable(test_dns_cache tests/unit/test_dns_cache.c)
 target_link_libraries(test_dns_cache PRIVATE pigeon_core)
 add_test(NAME dns_cache COMMAND test_dns_cache)
+
+add_executable(test_ipv6 tests/unit/test_ipv6.c)
+target_link_libraries(test_ipv6 PRIVATE pigeon_core)
+add_test(NAME ipv6 COMMAND test_ipv6)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(test_netif_addresses tests/unit/test_netif_addresses.c)
+    target_link_libraries(test_netif_addresses PRIVATE pigeon_core)
+    target_link_options(test_netif_addresses PRIVATE -Wl,--wrap=getifaddrs -Wl,--wrap=freeifaddrs
+            -Wl,--wrap=socket -Wl,--wrap=connect -Wl,--wrap=getsockname -Wl,--wrap=close)
+    add_test(NAME netif_addresses COMMAND test_netif_addresses)
+endif()
+
+add_executable(fuzz_packet tests/fuzz/fuzz_packet.c)
+target_link_libraries(fuzz_packet PRIVATE pigeon_core)

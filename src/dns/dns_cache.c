@@ -20,14 +20,14 @@ struct dns_cache {
     struct cache_entry *buckets[DNS_CACHE_BUCKETS];
 };
 
-static size_t bucket_for(uint32_t ip) {
-    return (ip ^ (ip >> 8) ^ (ip >> 16) ^ (ip >> 24)) % DNS_CACHE_BUCKETS;
+static size_t bucket_for(struct ip_addr ip) {
+    return ip_addr_hash(&ip) % DNS_CACHE_BUCKETS;
 }
 
-static struct cache_entry *find_entry(const struct dns_cache *cache, uint32_t ip) {
+static struct cache_entry *find_entry(const struct dns_cache *cache, struct ip_addr ip) {
     for (struct cache_entry *entry = cache->buckets[bucket_for(ip)];
          entry != NULL; entry = entry->next) {
-        if (entry->row.ip == ip) {
+        if (ip_addr_equal(&entry->row.ip, &ip)) {
             return entry;
         }
     }
@@ -189,7 +189,7 @@ int dns_cache_update(struct dns_cache *cache, const struct dns_answer *answer, i
     return 1;
 }
 
-const char *dns_cache_lookup(const struct dns_cache *cache, uint32_t ip, int64_t now) {
+const char *dns_cache_lookup(const struct dns_cache *cache, struct ip_addr ip, int64_t now) {
     const struct cache_entry *entry = find_entry(cache, ip);
 
     if (entry == NULL || now < entry->row.observed_at || now >= entry->row.expires_at) {
@@ -217,10 +217,20 @@ void dns_cache_expire(struct dns_cache *cache, int64_t now) {
     }
 }
 
-int dns_cache_observe(struct dns_cache *cache, const struct packet_view *packet,
-                       uint32_t local_ip, int64_t now) {
-    if (packet->kind != PACKET_UDP || packet->transport.udp.src_port != 53 ||
-        packet->ip.dst != local_ip) {
+int dns_cache_observe_addresses(struct dns_cache *cache, const struct packet_view *packet,
+                                 const struct ip_addr *locals, size_t local_count, int64_t now) {
+    if (packet->kind != PACKET_UDP || packet->transport.udp.src_port != 53) {
+        return 0;
+    }
+
+    const struct ip_addr destination = packet_destination(packet);
+    int local = 0;
+
+    for (size_t i = 0; i < local_count; i++) {
+        local |= ip_addr_equal(&destination, &locals[i]);
+    }
+
+    if (!local) {
         return 0;
     }
 
@@ -245,4 +255,11 @@ int dns_cache_observe(struct dns_cache *cache, const struct packet_view *packet,
     }
 
     return saved;
+}
+
+int dns_cache_observe(struct dns_cache *cache, const struct packet_view *packet,
+                       uint32_t local_ip, int64_t now) {
+    const struct ip_addr local = ip_addr_v4(local_ip);
+
+    return dns_cache_observe_addresses(cache, packet, &local, 1, now);
 }

@@ -7,6 +7,7 @@
 enum packet_kind {
     PACKET_ETHERNET,
     PACKET_IPV4,
+    PACKET_IPV6,
     PACKET_TCP,
     PACKET_UDP
 };
@@ -17,6 +18,7 @@ struct packet_view {
     enum packet_kind kind;
     struct eth_view eth;
     struct ipv4_view ip;
+    struct ipv6_view ip6;
     union {
         struct tcp_view tcp;
         struct udp_view udp;
@@ -33,5 +35,11 @@ struct packet_view {
  * header is malformed or not fully captured.
  */
 int packet_parse(const uint8_t *frame, size_t len, struct packet_view *out);
+
+/* Returns the source/destination address and final IP protocol of a decoded
+ * IP packet. IPv4 fields remain in ip; IPv6 fields remain in ip6. */
+struct ip_addr packet_source(const struct packet_view *packet);
+struct ip_addr packet_destination(const struct packet_view *packet);
+uint8_t packet_protocol(const struct packet_view *packet);
 
 #endif

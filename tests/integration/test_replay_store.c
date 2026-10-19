@@ -8,7 +8,7 @@
 #include "dns/dns_cache.h"
 #include <string.h>
 
-static void run_replay(const char *program, const char *fixture, const char *database) {
+static void run_replay(const char *program, const char *fixture, const char *database, const char *local) {
     const pid_t child = fork();
 
     CHECK(child != -1);
@@ -21,7 +21,7 @@ static void run_replay(const char *program, const char *fixture, const char *dat
         }
 
         close(output);
-        execl(program, program, "--local-ip", "192.0.2.10", "--db", database,
+        execl(program, program, "--local-ip", local, "--local-ip", "192.0.2.10", "--db", database,
               "-r", fixture, (char *)NULL);
         _exit(127);
     }
@@ -40,14 +40,14 @@ static void test_named_replay(const char *program, const char *fixture) {
     CHECK(fd != -1);
     CHECK(close(fd) == 0);
 
-    run_replay(program, fixture, path);
+    run_replay(program, fixture, path, "192.0.2.10");
 
     char error[STORE_ERROR_LEN];
     struct store *store = store_open(path, error);
     struct store_row row;
 
     const struct flow_key key = {
-        .us_ip = 0xC000020A, .remote_ip = 0xC633642A,
+        .us_ip = ip_addr_v4(0xC000020A), .remote_ip = ip_addr_v4(0xC633642A),
         .remote_port = 443, .protocol = 17
     };
 
@@ -68,8 +68,52 @@ static void test_named_replay(const char *program, const char *fixture) {
     CHECK(unlink(path) == 0);
 }
 
+static void test_ipv6_replay(const char *program, const char *fixture) {
+    char path[] = "/tmp/pigeon-ipv6-replay-XXXXXX";
+    const int fd = mkstemp(path);
+
+    CHECK(fd != -1);
+    CHECK(close(fd) == 0);
+
+    run_replay(program, fixture, path, "2001:db8::10");
+
+    char error[STORE_ERROR_LEN];
+    struct store *store = store_open(path, error);
+    struct store_row row;
+    struct flow_key key = { .remote_port = 443, .protocol = 6 };
+
+    CHECK(store != NULL);
+    CHECK(ip_addr_parse("2001:db8::10", &key.us_ip) == 0);
+    CHECK(ip_addr_parse("2001:db8:1::42", &key.remote_ip) == 0);
+    CHECK(store_lookup(store, &key, &row) == 1);
+    CHECK(row.delta.packets_out == 2);
+    CHECK(row.delta.packets_in == 1);
+    CHECK(row.delta.bytes_out == 15);
+    CHECK(row.delta.bytes_in == 6);
+    CHECK(strcmp(row.remote_name, "www.v6.example.test") == 0);
+
+    key.protocol = 17;
+
+    CHECK(store_lookup(store, &key, &row) == 1);
+    CHECK(row.delta.packets_out == 1);
+    CHECK(row.delta.bytes_out == 1);
+    CHECK(strcmp(row.remote_name, "www.v6.example.test") == 0);
+
+    struct dns_cache *cache = dns_cache_create(store, 8, 1700000006);
+
+    CHECK(cache != NULL);
+    CHECK(strcmp(dns_cache_lookup(cache, key.remote_ip, 1700000006), "www.v6.example.test") == 0);
+
+    dns_cache_destroy(cache);
+    store_close(store);
+
+    CHECK(unlink(path) == 0);
+}
+
 int main(int argc, char **argv) {
-    CHECK(argc == 5);
+    CHECK(argc == 6);
+
+    test_ipv6_replay(argv[1], argv[5]);
 
     test_named_replay(argv[1], argv[3]);
     test_named_replay(argv[1], argv[4]);
@@ -81,13 +125,13 @@ int main(int argc, char **argv) {
     CHECK(close(fd) == 0);
 
     for (unsigned run = 1; run <= 2; run++) {
-        run_replay(argv[1], argv[2], path);
+        run_replay(argv[1], argv[2], path, "192.0.2.10");
 
         char error[STORE_ERROR_LEN];
         struct store *store = store_open(path, error);
         struct store_row row;
         struct flow_key key = {
-            .us_ip = 0xC000020A, .remote_ip = 0xC6336414,
+            .us_ip = ip_addr_v4(0xC000020A), .remote_ip = ip_addr_v4(0xC6336414),
             .remote_port = 80, .protocol = 6
         };
 

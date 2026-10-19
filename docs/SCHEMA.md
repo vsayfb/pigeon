@@ -1,12 +1,14 @@
 # SQLite schema
 
-Schema version: **2**, stored in `PRAGMA user_version`.
+Schema version: **3**, stored in `PRAGMA user_version`.
 
 The storage module creates the schema only when version is zero and the
-existing database has no application objects. A version-1 database is migrated
-transactionally by adding `dns_cache` and its expiry index; conversation rows
-are unchanged. Other versions are rejected. A failed migration rolls back its
-schema changes and version update. Opening a versioned database also prepares the
+existing database has no application objects. Versions 1 and 2 migrate
+transactionally: version 1 first gains the DNS table, then integer IPv4 keys
+are converted to 4-byte network-order blobs. Version 3 also accepts 16-byte
+IPv6 keys. Totals, names and timestamps are preserved. Other versions are
+rejected. A failed migration restores the schema, rows and user version.
+Opening a versioned database also prepares the
 conversation statements, which fails if the required table or columns are
 missing.
 
@@ -26,8 +28,8 @@ connection. The table uses `WITHOUT ROWID` and this composite primary key:
 
 | Column | Storage | Meaning |
 |---|---|---|
-| `us_ip` | INTEGER | Local IPv4, host-order numeric value, 0–4294967295 |
-| `remote_ip` | INTEGER | Remote IPv4, same representation |
+| `us_ip` | BLOB | Local IP: 4 bytes for IPv4, 16 for IPv6 |
+| `remote_ip` | BLOB | Remote IP, same byte length/family as local IP |
 | `remote_port` | INTEGER | Remote endpoint's port, 0–65535 |
 | `protocol` | INTEGER | TCP = 6, UDP = 17 |
 | `packets_out` | INTEGER | Cumulative outgoing packet count |
@@ -38,7 +40,10 @@ connection. The table uses `WITHOUT ROWID` and this composite primary key:
 | `last_seen` | INTEGER | Latest observation, Unix seconds |
 | `remote_name` | TEXT or NULL | Optional name, 1–253 characters |
 
-For example, `192.0.2.10` is stored as the integer `3221225994` (`0xC000020A`).
+Address blobs use network byte order. For example, `192.0.2.10` is `X'C000020A'`;
+`2001:db8::10` is `X'20010DB8000000000000000000000010'`. Blob length identifies
+the family. IPv4-mapped IPv6 remains a separate 16-byte identity. `hex(remote_ip)`
+is useful when inspecting raw SQLite rows; the executable formats numeric IPs.
 The local ephemeral port is excluded from identity. The same remote address
 and port over TCP and UDP produce different rows.
 
@@ -82,7 +87,7 @@ Expired and evicted entries remain queryable in SQLite.
 
 | Column | Storage | Meaning |
 |---|---|---|
-| `ip` | INTEGER PRIMARY KEY | IPv4 address, host-order numeric value |
+| `ip` | BLOB PRIMARY KEY | IPv4/IPv6 address, 4/16 network-order bytes |
 | `name` | TEXT NOT NULL | Last observed name, 1–253 bytes in the C API |
 | `observed_at` | INTEGER NOT NULL | Capture timestamp in Unix seconds |
 | `expires_at` | INTEGER NOT NULL | Exclusive TTL expiry in Unix seconds |
@@ -108,8 +113,8 @@ name. A zero-counter upsert can name a previously flushed conversation without
 adding traffic. Once assigned, the conversation's name remains historical and
 is preserved even when the cache mapping changes or expires.
 
-Only A records from incoming plaintext UDP/53 responses addressed to the local
-IP are learned. TCP DNS, AAAA records, DoH and DoT are not learned. Complete
+A and AAAA records from incoming plaintext UDP/53 responses addressed to an
+assigned local IP are learned over either family. TCP DNS, DoH and DoT are not learned. Complete
 results from partial responses are accepted; malformed responses are ignored.
 This is an observed IP-to-name association, not proof of the service behind an
 IP. Shared CDN addresses use the last observed cache name; a stored conversation

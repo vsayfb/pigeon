@@ -18,7 +18,7 @@ struct store_row {
 
 /*
  * Opens or creates path, or an isolated in-memory database for ":memory:".
- * Creates schema version 2 in an empty database and migrates version 1; rejects
+ * Creates schema version 3 and migrates versions 1/2; rejects
  * unsupported versions. File databases use WAL and synchronous=FULL.
  * The caller owns the store and releases it with store_close(). error must
  * provide STORE_ERROR_LEN writable bytes. No database handle is borrowed.
@@ -58,7 +58,7 @@ int store_lookup(struct store *store, const struct flow_key *key, struct store_r
 const char *store_error(const struct store *store);
 
 struct store_dns_row {
-    uint32_t ip;
+    struct ip_addr ip;
     char name[STORE_NAME_LEN];
     int64_t observed_at;
     int64_t expires_at;

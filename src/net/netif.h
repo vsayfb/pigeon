@@ -2,6 +2,7 @@
 #define PIGEON_NET_NETIF_H
 
 #include <stdint.h>
+#include "proto/address.h"
 
 #define NETIF_NAME_LEN 16
 
@@ -28,5 +29,17 @@ int netif_lookup(uint32_t destination, struct netif_info *out);
  * as netif_lookup(); an invalid interface name also returns -1 with errno set.
  */
 int netif_lookup_on(uint32_t destination, const char *name, struct netif_info *out);
+
+/* Selects an explicit interface, or prefers the IPv4 route and falls back
+ * to an IPv6 route lookup when IPv4 is unavailable. IPv6 fallback sends no
+ * traffic. Legacy IPv4 local/gateway fields are zero when unavailable.
+ * Returns 0 on success or -1 with errno set, leaving out untouched. */
+int netif_select(const char *name, struct netif_info *out);
+
+/* Copies all IPv4/IPv6 addresses assigned to name. count receives the required
+ * number. capacity zero performs a count query without writing out. Returns
+ * 0 on success, or -1 with errno set; ENOSPC leaves out untouched. Addresses
+ * are a startup snapshot, including IPv6 privacy and link-local addresses. */
+int netif_addresses(const char *name, struct ip_addr *out, size_t capacity, size_t *count);
 
 #endif

@@ -18,10 +18,21 @@ For coverage-guided fuzzing with Clang/libFuzzer:
 clang -std=c11 -Wall -Wextra -Werror -g \
   -fsanitize=fuzzer,address,undefined -fno-sanitize-recover=undefined \
   -DDNS_LIBFUZZER -Isrc \
-  tests/fuzz/fuzz_dns_parse.c src/dns/dns_parse.c -o /tmp/pigeon-fuzz-dns
+  tests/fuzz/fuzz_dns_parse.c src/dns/dns_parse.c src/proto/address.c -o /tmp/pigeon-fuzz-dns
 mkdir -p /tmp/pigeon-dns-corpus
 /tmp/pigeon-fuzz-dns /tmp/pigeon-dns-corpus -max_len=65535
 ```
 
 Stop libFuzzer with Ctrl+C. It reports crashes and retains interesting inputs
 in its corpus. Seed files may contain complete or malformed raw DNS messages.
+
+The dual-stack packet parser also has a deterministic runner:
+
+```sh
+./build/fuzz_packet 1000000
+```
+
+Its optional second argument is a raw Ethernet frame, not a pcap. It checks
+unchanged output on parse failure and bounds/readable-versus-wire lengths on
+success. For libFuzzer, compile with `-DPACKET_LIBFUZZER`, the packet harness,
+and the sources in `src/proto/`, using the same sanitizer options above.

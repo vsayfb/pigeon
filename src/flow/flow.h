@@ -94,4 +94,9 @@ int flow_tick(struct flow *flow, int64_t now);
  * The cache must outlive the tracker or be detached with NULL. */
 void flow_set_dns_cache(struct flow *flow, struct dns_cache *cache);
 
+/* Creates a tracker with a copied snapshot of local IPv4/IPv6 addresses.
+ * Ownership and return values match flow_create(). At least one is required. */
+struct flow *flow_create_addresses(const struct ip_addr *addresses, size_t count,
+                                    size_t bucket_count, size_t capacity);
+
 #endif

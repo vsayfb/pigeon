@@ -12,7 +12,7 @@
 
 static struct flow_key key_for(uint16_t port, uint8_t protocol) {
     const struct flow_key key = {
-        .us_ip = LOCAL_IP, .remote_ip = REMOTE_IP,
+        .us_ip = ip_addr_v4(LOCAL_IP), .remote_ip = ip_addr_v4(REMOTE_IP),
         .remote_port = port, .protocol = protocol
     };
 

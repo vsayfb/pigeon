@@ -3,6 +3,7 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
+#include <ifaddrs.h>
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
 #include <net/if.h>
@@ -225,4 +226,145 @@ done:;
 
 int netif_lookup(uint32_t destination, struct netif_info *out) {
     return netif_lookup_on(destination, NULL, out);
+}
+
+int netif_addresses(const char *name, struct ip_addr *out, size_t capacity, size_t *count) {
+    struct ifaddrs *addresses;
+
+    if (getifaddrs(&addresses) == -1) {
+        return -1;
+    }
+
+    *count = 0;
+
+    for (const struct ifaddrs *entry = addresses; entry != NULL; entry = entry->ifa_next) {
+        if (entry->ifa_addr != NULL && strcmp(entry->ifa_name, name) == 0 &&
+            (entry->ifa_addr->sa_family == AF_INET || entry->ifa_addr->sa_family == AF_INET6)) {
+            (*count)++;
+        }
+    }
+
+    if (capacity != 0 && *count > capacity) {
+        freeifaddrs(addresses);
+        errno = ENOSPC;
+
+        return -1;
+    }
+
+    size_t written = 0;
+
+    for (const struct ifaddrs *entry = addresses; capacity != 0 && entry != NULL;
+         entry = entry->ifa_next) {
+        if (entry->ifa_addr == NULL || strcmp(entry->ifa_name, name) != 0) {
+            continue;
+        }
+
+        struct ip_addr address = { 0 };
+
+        if (entry->ifa_addr->sa_family == AF_INET) {
+            const struct sockaddr_in *v4 = (const struct sockaddr_in *)entry->ifa_addr;
+
+            address.family = 4;
+            memcpy(address.bytes, &v4->sin_addr, 4);
+        } else if (entry->ifa_addr->sa_family == AF_INET6) {
+            const struct sockaddr_in6 *v6 = (const struct sockaddr_in6 *)entry->ifa_addr;
+
+            address.family = 6;
+            memcpy(address.bytes, &v6->sin6_addr, 16);
+        } else {
+            continue;
+        }
+
+        out[written++] = address;
+    }
+
+    freeifaddrs(addresses);
+
+    if (*count == 0) {
+        errno = EADDRNOTAVAIL;
+
+        return -1;
+    }
+
+    return 0;
+}
+
+int netif_select(const char *name, struct netif_info *out) {
+    if (netif_lookup_on(0x01010101, name, out) == 0) {
+        return 0;
+    }
+
+    struct netif_info info = { 0 };
+
+    if (name != NULL) {
+        if (strlen(name) >= sizeof info.name || if_nametoindex(name) == 0) {
+            errno = ENODEV;
+
+            return -1;
+        }
+
+        memcpy(info.name, name, strlen(name) + 1);
+        *out = info;
+
+        return 0;
+    }
+
+    struct sockaddr_in6 destination = { .sin6_family = AF_INET6, .sin6_port = htons(53) };
+    struct sockaddr_in6 source;
+    socklen_t source_len = sizeof source;
+
+    inet_pton(AF_INET6, "2001:4860:4860::8888", &destination.sin6_addr);
+
+    const int fd = socket(AF_INET6, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+
+    if (fd == -1) {
+        return -1;
+    }
+
+    if (connect(fd, (const struct sockaddr *)&destination, sizeof destination) == -1 ||
+        getsockname(fd, (struct sockaddr *)&source, &source_len) == -1) {
+        const int saved_errno = errno;
+
+        close(fd);
+        errno = saved_errno;
+
+        return -1;
+    }
+
+    close(fd);
+
+    struct ifaddrs *addresses;
+
+    if (getifaddrs(&addresses) == -1) {
+        return -1;
+    }
+
+    int found = 0;
+
+    for (const struct ifaddrs *entry = addresses; entry != NULL; entry = entry->ifa_next) {
+        if (entry->ifa_addr == NULL || entry->ifa_addr->sa_family != AF_INET6) {
+            continue;
+        }
+
+        const struct sockaddr_in6 *address = (const struct sockaddr_in6 *)entry->ifa_addr;
+
+        if (memcmp(&source.sin6_addr, &address->sin6_addr, 16) == 0 &&
+            strlen(entry->ifa_name) < sizeof info.name) {
+            memcpy(info.name, entry->ifa_name, strlen(entry->ifa_name) + 1);
+            found = 1;
+            break;
+        }
+    }
+
+    freeifaddrs(addresses);
+
+    if (!found) {
+        errno = EADDRNOTAVAIL;
+
+        return -1;
+    }
+
+    *out = info;
+
+    return 0;
 }

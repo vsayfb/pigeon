@@ -7,7 +7,8 @@
 #include <string.h>
 
 struct flow {
-    uint32_t local_ip;
+    struct ip_addr *local_addresses;
+    size_t local_count;
     struct flow_table *table;
 
     flow_evict_cb on_evict;
@@ -86,22 +87,47 @@ static int handoff_eviction(const struct flow_entry *entry, void *user) {
     return flow->on_evict(entry, flow->evict_user);
 }
 
-struct flow *flow_create(uint32_t local_ip, size_t bucket_count, size_t capacity) {
+struct flow *flow_create_addresses(const struct ip_addr *addresses, size_t count,
+                                    size_t bucket_count, size_t capacity) {
+    if (addresses == NULL || count == 0 || count > SIZE_MAX / sizeof *addresses) {
+        errno = EINVAL;
+
+        return NULL;
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        if (ip_addr_size(&addresses[i]) == 0) {
+            errno = EINVAL;
+
+            return NULL;
+        }
+    }
+
     struct flow *flow = malloc(sizeof *flow);
 
     if (flow == NULL) {
         return NULL;
     }
 
-    flow->table = flow_table_create(bucket_count, capacity);
+    flow->local_addresses = malloc(count * sizeof *addresses);
 
-    if (flow->table == NULL) {
+    if (flow->local_addresses == NULL) {
         free(flow);
 
         return NULL;
     }
 
-    flow->local_ip = local_ip;
+    memcpy(flow->local_addresses, addresses, count * sizeof *addresses);
+    flow->local_count = count;
+    flow->table = flow_table_create(bucket_count, capacity);
+
+    if (flow->table == NULL) {
+        free(flow->local_addresses);
+        free(flow);
+
+        return NULL;
+    }
+
     flow->on_evict = NULL;
     flow->evict_user = NULL;
     flow->store = NULL;
@@ -122,6 +148,7 @@ void flow_destroy(struct flow *flow) {
     }
 
     flow_table_destroy(flow->table);
+    free(flow->local_addresses);
     free(flow);
 }
 
@@ -130,8 +157,15 @@ int flow_observe(struct flow *flow, const struct packet_view *packet, int64_t no
         return 0;
     }
 
-    const int outgoing = packet->ip.src == flow->local_ip;
-    const int incoming = packet->ip.dst == flow->local_ip;
+    const struct ip_addr source = packet_source(packet);
+    const struct ip_addr destination = packet_destination(packet);
+    int outgoing = 0;
+    int incoming = 0;
+
+    for (size_t i = 0; i < flow->local_count; i++) {
+        outgoing |= ip_addr_equal(&source, &flow->local_addresses[i]);
+        incoming |= ip_addr_equal(&destination, &flow->local_addresses[i]);
+    }
 
     if (outgoing == incoming) {
         return 0;
@@ -149,10 +183,10 @@ int flow_observe(struct flow *flow, const struct packet_view *packet, int64_t no
     }
 
     const struct flow_key key = {
-        .us_ip = flow->local_ip,
-        .remote_ip = outgoing ? packet->ip.dst : packet->ip.src,
+        .us_ip = outgoing ? source : destination,
+        .remote_ip = outgoing ? destination : source,
         .remote_port = outgoing ? destination_port : source_port,
-        .protocol = packet->ip.protocol
+        .protocol = packet_protocol(packet)
     };
 
     flow->name_time = now;
@@ -340,4 +374,10 @@ int flow_tick(struct flow *flow, int64_t now) {
 
 void flow_set_dns_cache(struct flow *flow, struct dns_cache *cache) {
     flow->dns = cache;
+}
+
+struct flow *flow_create(uint32_t local_ip, size_t bucket_count, size_t capacity) {
+    const struct ip_addr address = ip_addr_v4(local_ip);
+
+    return flow_create_addresses(&address, 1, bucket_count, capacity);
 }

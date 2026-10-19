@@ -2,22 +2,8 @@
 
 #include "proto/bytes.h"
 
-/*
- * Size of the IP payload according to the IP header. Independent of the
- * captured length and of Ethernet padding.
- */
-static size_t ip_payload_wire_len(const struct ipv4_view *ip) {
-    return (size_t)(ip->total_len - ip->header_len);
-}
-
-int tcp_parse(const struct ipv4_view *ip, struct tcp_view *out) {
-    if (ip->frag_offset != 0) {
-        return -1;
-    }
-
-    const uint8_t *seg = ip->payload;
-    const size_t captured = ip->payload_len;
-
+static int tcp_decode(const uint8_t *seg, size_t captured, size_t wire,
+                       struct tcp_view *out) {
     if (captured < TCP_MIN_HEADER_LEN) {
         return -1;
     }
@@ -29,26 +15,19 @@ int tcp_parse(const struct ipv4_view *ip, struct tcp_view *out) {
         return -1;
     }
 
-    /* ipv4_parse guarantees captured <= ip_payload_wire_len(ip), and
-     * header_len <= captured, so neither subtraction can underflow. */
+    /* IP parsing bounds captured by wire; header_len <= captured. */
     out->src_port = be16(seg);
     out->dst_port = be16(seg + 2);
     out->header_len = (uint8_t)header_len;
     out->payload = seg + header_len;
     out->payload_len = captured - header_len;
-    out->payload_wire_len = ip_payload_wire_len(ip) - header_len;
+    out->payload_wire_len = wire - header_len;
 
     return 0;
 }
 
-int udp_parse(const struct ipv4_view *ip, struct udp_view *out) {
-    if (ip->frag_offset != 0) {
-        return -1;
-    }
-
-    const uint8_t *dgram = ip->payload;
-    const size_t captured = ip->payload_len;
-
+static int udp_decode(const uint8_t *dgram, size_t captured, size_t wire,
+                       struct udp_view *out) {
     if (captured < UDP_HEADER_LEN) {
         return -1;
     }
@@ -62,7 +41,6 @@ int udp_parse(const struct ipv4_view *ip, struct udp_view *out) {
     /* The datagram ends at the UDP length or the end of the IP payload,
      * whichever is smaller; readable bytes are further bounded by the
      * capture. Both bounds are at least UDP_HEADER_LEN here. */
-    const size_t wire = ip_payload_wire_len(ip);
     const size_t wire_end = udp_len < wire ? udp_len : wire;
     const size_t read_end = wire_end < captured ? wire_end : captured;
 
@@ -73,4 +51,36 @@ int udp_parse(const struct ipv4_view *ip, struct udp_view *out) {
     out->payload_wire_len = wire_end - UDP_HEADER_LEN;
 
     return 0;
+}
+
+int tcp_parse(const struct ipv4_view *ip, struct tcp_view *out) {
+    if (ip->frag_offset != 0) {
+        return -1;
+    }
+
+    return tcp_decode(ip->payload, ip->payload_len, ip->total_len - ip->header_len, out);
+}
+
+int udp_parse(const struct ipv4_view *ip, struct udp_view *out) {
+    if (ip->frag_offset != 0) {
+        return -1;
+    }
+
+    return udp_decode(ip->payload, ip->payload_len, ip->total_len - ip->header_len, out);
+}
+
+int tcp_parse_ipv6(const struct ipv6_view *ip, struct tcp_view *out) {
+    if (ip->frag_offset != 0) {
+        return -1;
+    }
+
+    return tcp_decode(ip->payload, ip->payload_len, ip->payload_wire_len, out);
+}
+
+int udp_parse_ipv6(const struct ipv6_view *ip, struct udp_view *out) {
+    if (ip->frag_offset != 0) {
+        return -1;
+    }
+
+    return udp_decode(ip->payload, ip->payload_len, ip->payload_wire_len, out);
 }

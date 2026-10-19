@@ -86,8 +86,8 @@ static void test_a_records_and_output_limits(void) {
 
     CHECK(dns_parse_response(m.data, m.len, out, 2, &count) == DNS_PARSE_OK);
     CHECK(count == 2);
-    CHECK(out[0].ip == 0xC633642A);
-    CHECK(out[1].ip == 0xC633642B);
+    CHECK(ip_addr_v4_value(&out[0].ip) == 0xC633642A);
+    CHECK(ip_addr_v4_value(&out[1].ip) == 0xC633642B);
     CHECK(out[0].ttl == 300);
     CHECK(strcmp(out[0].name, "www.example.test") == 0);
     CHECK(dns_parse_response(m.data, m.len, NULL, 0, &count) == DNS_PARSE_PARTIAL);
@@ -176,7 +176,7 @@ static void test_truncation_and_malformed_tail(void) {
 
     CHECK(dns_parse_response(m.data, m.len, out, 2, &count) == DNS_PARSE_INVALID);
     CHECK(count == 1);
-    CHECK(out[0].ip == 0xC633642A);
+    CHECK(ip_addr_v4_value(&out[0].ip) == 0xC633642A);
 }
 
 static void test_bad_names_and_lengths(void) {
@@ -248,7 +248,7 @@ static void test_limits_and_unknown_records(void) {
 
     m = begin_message(2);
     put_name(&m, "www.example.test");
-    put16(&m, 28);
+    put16(&m, 16);
     put16(&m, 1);
     put32(&m, 300);
     put16(&m, 16);
@@ -314,7 +314,7 @@ static void check_fixture(const uint8_t *data, uint32_t caplen, uint32_t wirelen
 
     if (packet.transport.udp.src_port == 53) {
         CHECK(count == 1);
-        CHECK(out[0].ip == 0xC633642A);
+        CHECK(ip_addr_v4_value(&out[0].ip) == 0xC633642A);
         CHECK(out[0].ttl == 60);
         CHECK(strcmp(out[0].name, "www.example.test") == 0);
 

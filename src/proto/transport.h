@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "proto/ipv4.h"
+#include "proto/ipv6.h"
 
 #define TCP_MIN_HEADER_LEN 20
 #define UDP_HEADER_LEN     8
@@ -63,5 +64,10 @@ int tcp_parse(const struct ipv4_view *ip, struct tcp_view *out);
  * length is below UDP_HEADER_LEN.
  */
 int udp_parse(const struct ipv4_view *ip, struct udp_view *out);
+
+/* Same ownership, payload semantics and return values as the IPv4 parsers.
+ * Input must come from ipv6_parse(); later fragments are rejected. */
+int tcp_parse_ipv6(const struct ipv6_view *ip, struct tcp_view *out);
+int udp_parse_ipv6(const struct ipv6_view *ip, struct udp_view *out);
 
 #endif

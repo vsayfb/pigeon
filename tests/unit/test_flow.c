@@ -31,8 +31,8 @@ static void test_direction_and_local_ports(enum packet_kind kind) {
     struct packet_view packet = make_packet(kind, 1, 49152, 443);
 
     const struct flow_key key = {
-        .us_ip = LOCAL_IP,
-        .remote_ip = REMOTE_IP,
+        .us_ip = ip_addr_v4(LOCAL_IP),
+        .remote_ip = ip_addr_v4(REMOTE_IP),
         .remote_port = 443,
         .protocol = kind == PACKET_TCP ? IP_PROTO_TCP : IP_PROTO_UDP
     };
@@ -70,8 +70,8 @@ static void test_incoming_first_and_distinct_services(void) {
     struct packet_view packet = make_packet(PACKET_UDP, 0, 49152, 53);
 
     const struct flow_key key = {
-        .us_ip = LOCAL_IP,
-        .remote_ip = REMOTE_IP,
+        .us_ip = ip_addr_v4(LOCAL_IP),
+        .remote_ip = ip_addr_v4(REMOTE_IP),
         .remote_port = 53,
         .protocol = IP_PROTO_UDP
     };
@@ -111,8 +111,8 @@ static void test_ignored_packets(void) {
     CHECK(flow_observe(flow, &packet, 100) == 1);
 
     const struct flow_key key = {
-        .us_ip = LOCAL_IP,
-        .remote_ip = REMOTE_IP,
+        .us_ip = ip_addr_v4(LOCAL_IP),
+        .remote_ip = ip_addr_v4(REMOTE_IP),
         .remote_port = 443,
         .protocol = IP_PROTO_TCP
     };
@@ -153,8 +153,8 @@ static void test_deltas_and_times(enum packet_kind kind) {
     struct packet_view packet = make_packet(kind, 1, 49152, 443);
 
     const struct flow_key key = {
-        .us_ip = LOCAL_IP,
-        .remote_ip = REMOTE_IP,
+        .us_ip = ip_addr_v4(LOCAL_IP),
+        .remote_ip = ip_addr_v4(REMOTE_IP),
         .remote_port = 443,
         .protocol = kind == PACKET_TCP ? IP_PROTO_TCP : IP_PROTO_UDP
     };
@@ -238,7 +238,7 @@ static void test_eviction_handoff_and_touch(void) {
     struct handoff handoff = { 0 };
 
     const struct flow_key a = {
-        .us_ip = LOCAL_IP, .remote_ip = REMOTE_IP,
+        .us_ip = ip_addr_v4(LOCAL_IP), .remote_ip = ip_addr_v4(REMOTE_IP),
         .remote_port = 443, .protocol = IP_PROTO_TCP
     };
 

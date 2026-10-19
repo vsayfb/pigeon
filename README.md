@@ -19,19 +19,20 @@ Replay a fixture with packet details:
 ```
 
 Live capture is currently Linux only and requires capture privileges.
-Run `./build/pigeon --verbose` to select the interface, local IPv4 address
-and gateway from the kernel route to `1.1.1.1`. This lookup sends no traffic.
-Use `./build/pigeon --verbose <interface>` to constrain that route lookup to
-a named interface. Discovery fails if that interface has no usable route.
-Startup reports the selected address and gateway (zero for a direct route).
+Run `./build/pigeon --verbose` to select the capture interface from the IPv4
+route to `1.1.1.1`, falling back to an IPv6 route when IPv4 is unavailable.
+Route lookup sends no traffic. `./build/pigeon --verbose <interface>` selects
+an interface explicitly. Startup lists all its assigned IPv4 and IPv6
+addresses, including IPv6 temporary and link-local addresses.
 
-Discovery happens once at startup; address and route changes are not tracked.
-Offline replay skips discovery. Other platforms report ENOSYS for discovery.
+Address discovery happens once at startup; address and route changes are not
+tracked. Capture remains on one interface. Offline replay skips discovery.
+Other platforms report ENOSYS for discovery.
 
 Omit `--verbose` to disable packet output; startup,
 errors and the final packet count still go to stderr.
 
-Ethernet, IPv4, TCP and UDP parsing is separate from printing. Unsupported
+Ethernet, IPv4, IPv6, TCP and UDP parsing is separate from printing. Unsupported
 protocols and later IP fragments retain only their decoded enclosing headers.
 Malformed or truncated supported headers are reported in verbose mode.
 
@@ -75,7 +76,7 @@ The build requires `libsqlite3-dev` and `libpcap-dev` on Debian/Ubuntu.
 See [docs/SCHEMA.md](docs/SCHEMA.md) for the schema and write semantics.
 
 DNS response decoding is implemented independently in `src/dns/dns_parse.[ch]`.
-It extracts IN-class A records, follows CNAME chains, and decodes compressed
+It extracts IN-class A and AAAA records, follows CNAME chains, and decodes compressed
 names. Results own their lowercase names and retain the minimum chain TTL.
 Complete records remain available when a later answer is truncated. The parser
 bounds questions, answer records, name walks, and caller-provided output.
@@ -86,11 +87,11 @@ and SQLite. Saved mappings reload at startup and expire according to the minimum
 CNAME/A TTL. Flows look up names on observation and at flush; a late reply can
 name an already flushed conversation without adding its counters again.
 Verbose conversation summaries include `name=...` (`name=-` when unknown).
-Existing schema-version-1 databases migrate automatically to version 2.
+Existing schema-version-1/2 databases migrate transactionally to version 3.
 
 The cache keeps the last observed name for a shared IP; stored conversations
-retain their first assigned name. Only plaintext UDP/53 A responses are learned;
-TCP DNS, IPv6 records, DoH and DoT remain outside this version.
+retain their first assigned name. Plaintext UDP/53 A and AAAA responses are learned over IPv4 or IPv6;
+TCP DNS, DoH and DoT remain outside this version.
 
 Synthetic query/reply fixtures use RFC 5737 addresses and valid checksums.
 Regenerate them with:
@@ -113,3 +114,21 @@ To inspect DNS naming through the entire pipeline:
 The service conversation to `198.51.100.42:443` receives `www.example.test`,
 even though the traffic precedes the DNS reply. Use `--db <path>` to persist
 both conversation totals and DNS mappings from replay.
+
+IPv6 TCP/UDP conversations use the same aggregation, LRU, expiry and persistence
+pipeline as IPv4. Address family is part of identity: IPv4-mapped IPv6 addresses
+are not collapsed into IPv4. Numeric IPv6 endpoints use brackets before ports.
+Common hop-by-hop, routing, destination, fragment and AH extension headers are
+decoded with a 16-header limit. Later fragments are not reassembled; ESP and
+unknown protocols are displayed at the IP layer but do not create conversations.
+IPv6 jumbograms and link-local zone identifiers in storage are not supported.
+
+Replay supports repeated `--local-ip` options for both address families:
+
+```sh
+./build/pigeon --verbose --local-ip 2001:db8::10 -r tests/fixtures/ipv6_conversations.pcap
+```
+
+This fixture includes AAAA naming, extension headers, TCP/UDP traffic in both
+directions, and a truncated TCP payload. Regenerate it with
+`python3 tests/fixtures/make_ipv6.py`.

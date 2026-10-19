@@ -14,7 +14,7 @@
 #define REMOTE_IP UINT32_C(0xC633642A)
 
 static struct dns_answer answer_for(uint32_t ip, const char *name, uint32_t ttl) {
-    struct dns_answer answer = { .ip = ip, .ttl = ttl };
+    struct dns_answer answer = { .ip = ip_addr_v4(ip), .ttl = ttl };
 
     strcpy(answer.name, name);
 
@@ -37,20 +37,20 @@ static void test_ttl_replacement_and_capacity(void) {
 
     CHECK(cache != NULL);
     CHECK(dns_cache_update(cache, &answer, 100) == 1);
-    CHECK(dns_cache_lookup(cache, REMOTE_IP, 99) == NULL);
-    CHECK(strcmp(dns_cache_lookup(cache, REMOTE_IP, 129), "first.test") == 0);
-    CHECK(dns_cache_lookup(cache, REMOTE_IP, 130) == NULL);
+    CHECK(dns_cache_lookup(cache, ip_addr_v4(REMOTE_IP), 99) == NULL);
+    CHECK(strcmp(dns_cache_lookup(cache, ip_addr_v4(REMOTE_IP), 129), "first.test") == 0);
+    CHECK(dns_cache_lookup(cache, ip_addr_v4(REMOTE_IP), 130) == NULL);
 
     answer = answer_for(REMOTE_IP, "second.test", 60);
 
     CHECK(dns_cache_update(cache, &answer, 110) == 1);
     CHECK(dns_cache_update(cache, &answer, 109) == 0);
-    CHECK(strcmp(dns_cache_lookup(cache, REMOTE_IP, 110), "second.test") == 0);
+    CHECK(strcmp(dns_cache_lookup(cache, ip_addr_v4(REMOTE_IP), 110), "second.test") == 0);
 
     answer.ttl = 0;
 
     CHECK(dns_cache_update(cache, &answer, 111) == 1);
-    CHECK(dns_cache_lookup(cache, REMOTE_IP, 111) == NULL);
+    CHECK(dns_cache_lookup(cache, ip_addr_v4(REMOTE_IP), 111) == NULL);
 
     answer = answer_for(REMOTE_IP + 256, "collision.test", 60);
 
@@ -59,18 +59,18 @@ static void test_ttl_replacement_and_capacity(void) {
     answer = answer_for(REMOTE_IP + 512, "third.test", 60);
 
     CHECK(dns_cache_update(cache, &answer, 113) == 1);
-    CHECK(dns_cache_lookup(cache, REMOTE_IP, 113) == NULL);
-    CHECK(strcmp(dns_cache_lookup(cache, REMOTE_IP + 256, 113), "collision.test") == 0);
+    CHECK(dns_cache_lookup(cache, ip_addr_v4(REMOTE_IP), 113) == NULL);
+    CHECK(strcmp(dns_cache_lookup(cache, ip_addr_v4(REMOTE_IP + 256), 113), "collision.test") == 0);
 
     answer = answer_for(REMOTE_IP + 768, "fourth.test", 60);
 
     CHECK(dns_cache_update(cache, &answer, 114) == 1);
-    CHECK(dns_cache_lookup(cache, REMOTE_IP + 256, 114) == NULL);
+    CHECK(dns_cache_lookup(cache, ip_addr_v4(REMOTE_IP + 256), 114) == NULL);
 
     dns_cache_expire(cache, 174);
 
-    CHECK(dns_cache_lookup(cache, REMOTE_IP + 512, 174) == NULL);
-    CHECK(dns_cache_lookup(cache, REMOTE_IP + 768, 174) == NULL);
+    CHECK(dns_cache_lookup(cache, ip_addr_v4(REMOTE_IP + 512), 174) == NULL);
+    CHECK(dns_cache_lookup(cache, ip_addr_v4(REMOTE_IP + 768), 174) == NULL);
 
     dns_cache_destroy(cache);
     store_close(store);
@@ -98,14 +98,14 @@ static void test_persistent_reload(void) {
     cache = dns_cache_create(store, 8, 110);
 
     CHECK(cache != NULL);
-    CHECK(strcmp(dns_cache_lookup(cache, REMOTE_IP, 110), "saved.test") == 0);
+    CHECK(strcmp(dns_cache_lookup(cache, ip_addr_v4(REMOTE_IP), 110), "saved.test") == 0);
 
     dns_cache_destroy(cache);
 
     cache = dns_cache_create(store, 8, 160);
 
     CHECK(cache != NULL);
-    CHECK(dns_cache_lookup(cache, REMOTE_IP, 160) == NULL);
+    CHECK(dns_cache_lookup(cache, ip_addr_v4(REMOTE_IP), 160) == NULL);
 
     dns_cache_destroy(cache);
     store_close(store);
@@ -136,7 +136,7 @@ static void test_flow_naming(int dns_first) {
     struct store_row row;
 
     const struct flow_key key = {
-        .us_ip = LOCAL_IP, .remote_ip = REMOTE_IP,
+        .us_ip = ip_addr_v4(LOCAL_IP), .remote_ip = ip_addr_v4(REMOTE_IP),
         .remote_port = 443, .protocol = IP_PROTO_TCP
     };
 
@@ -188,7 +188,7 @@ static void test_failure_preserves_memory_and_migration(void) {
     sqlite3 *db = NULL;
 
     CHECK(sqlite3_open(path, &db) == SQLITE_OK);
-    CHECK(sqlite3_exec(db, STORE_CONVERSATIONS_SQL "PRAGMA user_version=1;"
+    CHECK(sqlite3_exec(db, STORE_CONVERSATIONS_V2_SQL "PRAGMA user_version=1;"
                       "INSERT INTO conversations VALUES(3221225994,3325256746,443,6,"
                       "3,2,100,200,100,110,'original.test')", NULL, NULL, NULL) == SQLITE_OK);
 
@@ -199,7 +199,7 @@ static void test_failure_preserves_memory_and_migration(void) {
     struct store_row row;
 
     const struct flow_key key = {
-        .us_ip = LOCAL_IP, .remote_ip = REMOTE_IP,
+        .us_ip = ip_addr_v4(LOCAL_IP), .remote_ip = ip_addr_v4(REMOTE_IP),
         .remote_port = 443, .protocol = IP_PROTO_TCP
     };
 
@@ -216,9 +216,9 @@ static void test_failure_preserves_memory_and_migration(void) {
 
     CHECK(dns_cache_update(cache, &answer, 110) == -1);
     CHECK(errno == EIO);
-    CHECK(strcmp(dns_cache_lookup(cache, REMOTE_IP, 110), "old.test") == 0);
+    CHECK(strcmp(dns_cache_lookup(cache, ip_addr_v4(REMOTE_IP), 110), "old.test") == 0);
 
-    answer.ip++;
+    answer.ip.bytes[3]++;
 
     CHECK(dns_cache_update(cache, &answer, 110) == -1);
     CHECK(dns_cache_lookup(cache, answer.ip, 110) == NULL);
@@ -232,8 +232,8 @@ static void test_failure_preserves_memory_and_migration(void) {
     cache = dns_cache_create(store, 8, 111);
 
     CHECK(cache != NULL);
-    CHECK(strcmp(dns_cache_lookup(cache, REMOTE_IP, 111), "old.test") == 0);
-    CHECK(strcmp(dns_cache_lookup(cache, REMOTE_IP + 1, 111), "new.test") == 0);
+    CHECK(strcmp(dns_cache_lookup(cache, ip_addr_v4(REMOTE_IP), 111), "old.test") == 0);
+    CHECK(strcmp(dns_cache_lookup(cache, ip_addr_v4(REMOTE_IP + 1), 111), "new.test") == 0);
 
     dns_cache_destroy(cache);
     store_close(store);
@@ -261,7 +261,7 @@ static void test_observe_filters_and_partial_reply(void) {
 
     CHECK(cache != NULL);
     CHECK(dns_cache_observe(cache, &packet, LOCAL_IP, 100) == 1);
-    CHECK(strcmp(dns_cache_lookup(cache, REMOTE_IP, 100), "a.test") == 0);
+    CHECK(strcmp(dns_cache_lookup(cache, ip_addr_v4(REMOTE_IP), 100), "a.test") == 0);
 
     packet.transport.udp.src_port = 443;
 
@@ -286,7 +286,7 @@ static void test_observe_filters_and_partial_reply(void) {
     data[13] = 12;
 
     CHECK(dns_cache_observe(cache, &packet, LOCAL_IP, 102) == 0);
-    CHECK(dns_cache_lookup(cache, REMOTE_IP, 131) == NULL);
+    CHECK(dns_cache_lookup(cache, ip_addr_v4(REMOTE_IP), 131) == NULL);
 
     dns_cache_destroy(cache);
     store_close(store);
@@ -301,7 +301,7 @@ static void test_late_name_on_clean_eviction(void) {
     struct store_row row;
 
     const struct flow_key key = {
-        .us_ip = LOCAL_IP, .remote_ip = REMOTE_IP,
+        .us_ip = ip_addr_v4(LOCAL_IP), .remote_ip = ip_addr_v4(REMOTE_IP),
         .remote_port = 443, .protocol = IP_PROTO_TCP
     };
 
@@ -338,7 +338,7 @@ static void test_migration_failure_rolls_back(void) {
     CHECK(fd != -1);
     CHECK(close(fd) == 0);
     CHECK(sqlite3_open(path, &db) == SQLITE_OK);
-    CHECK(sqlite3_exec(db, STORE_CONVERSATIONS_SQL
+    CHECK(sqlite3_exec(db, STORE_CONVERSATIONS_V2_SQL
                       "CREATE TABLE dns_cache(conflict INTEGER);PRAGMA user_version=1;",
                       NULL, NULL, NULL) == SQLITE_OK);
     CHECK(store_open(path, error) == NULL);

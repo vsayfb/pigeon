@@ -27,7 +27,7 @@ int dns_cache_update(struct dns_cache *cache, const struct dns_answer *answer, i
 
 /* Returns a borrowed name only for observed_at <= now < expires_at, or NULL.
  * The pointer is valid until the next update, expiry or destruction. */
-const char *dns_cache_lookup(const struct dns_cache *cache, uint32_t ip, int64_t now);
+const char *dns_cache_lookup(const struct dns_cache *cache, struct ip_addr ip, int64_t now);
 
 /* Removes expired mappings from memory, retaining their SQLite rows. */
 void dns_cache_expire(struct dns_cache *cache, int64_t now);
@@ -39,5 +39,10 @@ void dns_cache_expire(struct dns_cache *cache, int64_t now);
  * save fails. No packet bytes are retained. */
 int dns_cache_observe(struct dns_cache *cache, const struct packet_view *packet,
                        uint32_t local_ip, int64_t now);
+
+/* Dual-stack version of dns_cache_observe(), accepting all local interface
+ * addresses. Only responses addressed to one of these addresses are learned. */
+int dns_cache_observe_addresses(struct dns_cache *cache, const struct packet_view *packet,
+                                 const struct ip_addr *locals, size_t count, int64_t now);
 
 #endif

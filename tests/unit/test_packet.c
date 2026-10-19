@@ -60,8 +60,14 @@ static void test_layers_and_lengths(void) {
     frame[12] = 0x86;
     frame[13] = 0xDD;
 
-    CHECK(packet_parse(frame, 14, &packet) == 0);
-    CHECK(packet.kind == PACKET_ETHERNET);
+    CHECK(packet_parse(frame, 14, &packet) == -1);
+
+    frame[14] = 0x60;
+    frame[18] = frame[19] = 0;
+    frame[20] = 59;
+
+    CHECK(packet_parse(frame, 54, &packet) == 0);
+    CHECK(packet.kind == PACKET_IPV6);
     CHECK(packet.eth.ethertype == ETHERTYPE_IPV6);
 }
 

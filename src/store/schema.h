@@ -1,9 +1,9 @@
 #ifndef PIGEON_STORE_SCHEMA_H
 #define PIGEON_STORE_SCHEMA_H
 
-#define SCHEMA_VERSION 2
+#define SCHEMA_VERSION 3
 
-#define STORE_CONVERSATIONS_SQL \
+#define STORE_CONVERSATIONS_V2_SQL \
     "CREATE TABLE conversations (" \
     "us_ip INTEGER NOT NULL CHECK(us_ip BETWEEN 0 AND 4294967295)," \
     "remote_ip INTEGER NOT NULL CHECK(remote_ip BETWEEN 0 AND 4294967295)," \
@@ -19,7 +19,7 @@
     "PRIMARY KEY(us_ip,remote_ip,remote_port,protocol)" \
     ") WITHOUT ROWID;"
 
-#define STORE_DNS_SCHEMA_SQL \
+#define STORE_DNS_V2_SQL \
     "CREATE TABLE dns_cache (" \
     "ip INTEGER PRIMARY KEY CHECK(ip BETWEEN 0 AND 4294967295)," \
     "name TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 253)," \
@@ -28,6 +28,43 @@
     ");" \
     "CREATE INDEX dns_cache_expiry ON dns_cache(expires_at);" \
     "PRAGMA user_version=2;"
+
+#define STORE_CONVERSATIONS_SQL \
+    "CREATE TABLE conversations (" \
+    "us_ip BLOB NOT NULL CHECK(typeof(us_ip)='blob' AND length(us_ip) IN (4,16))," \
+    "remote_ip BLOB NOT NULL CHECK(typeof(remote_ip)='blob' AND length(remote_ip)=length(us_ip))," \
+    "remote_port INTEGER NOT NULL CHECK(remote_port BETWEEN 0 AND 65535)," \
+    "protocol INTEGER NOT NULL CHECK(protocol IN (6,17))," \
+    "packets_out INTEGER NOT NULL CHECK(typeof(packets_out)='integer' AND packets_out>=0)," \
+    "packets_in INTEGER NOT NULL CHECK(typeof(packets_in)='integer' AND packets_in>=0)," \
+    "bytes_out INTEGER NOT NULL CHECK(typeof(bytes_out)='integer' AND bytes_out>=0)," \
+    "bytes_in INTEGER NOT NULL CHECK(typeof(bytes_in)='integer' AND bytes_in>=0)," \
+    "first_seen INTEGER NOT NULL," \
+    "last_seen INTEGER NOT NULL CHECK(first_seen<=last_seen)," \
+    "remote_name TEXT CHECK(remote_name IS NULL OR length(remote_name) BETWEEN 1 AND 253)," \
+    "PRIMARY KEY(us_ip,remote_ip,remote_port,protocol)" \
+    ") WITHOUT ROWID;"
+
+#define STORE_DNS_SCHEMA_SQL \
+    "CREATE TABLE dns_cache (" \
+    "ip BLOB PRIMARY KEY NOT NULL CHECK(typeof(ip)='blob' AND length(ip) IN (4,16))," \
+    "name TEXT NOT NULL CHECK(length(name) BETWEEN 1 AND 253)," \
+    "observed_at INTEGER NOT NULL," \
+    "expires_at INTEGER NOT NULL CHECK(expires_at>=observed_at)" \
+    ");" \
+    "CREATE INDEX dns_cache_expiry ON dns_cache(expires_at);" \
+    "PRAGMA user_version=3;"
+
+#define STORE_MIGRATE_V2_SQL \
+    "ALTER TABLE conversations RENAME TO conversations_v2;" \
+    "ALTER TABLE dns_cache RENAME TO dns_cache_v2;" \
+    "DROP INDEX dns_cache_expiry;" \
+    STORE_CONVERSATIONS_SQL STORE_DNS_SCHEMA_SQL \
+    "INSERT INTO conversations SELECT ipv4_blob(us_ip),ipv4_blob(remote_ip)," \
+    "remote_port,protocol,packets_out,packets_in,bytes_out,bytes_in,first_seen,last_seen," \
+    "remote_name FROM conversations_v2;" \
+    "INSERT INTO dns_cache SELECT ipv4_blob(ip),name,observed_at,expires_at FROM dns_cache_v2;" \
+    "DROP TABLE conversations_v2;DROP TABLE dns_cache_v2;"
 
 #define STORE_SCHEMA_SQL STORE_CONVERSATIONS_SQL STORE_DNS_SCHEMA_SQL
 

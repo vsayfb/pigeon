@@ -6,8 +6,8 @@
 
 static struct flow_key make_key(uint32_t remote_ip) {
     const struct flow_key key = {
-        .us_ip = 0xC000020A,
-        .remote_ip = remote_ip,
+        .us_ip = ip_addr_v4(0xC000020A),
+        .remote_ip = ip_addr_v4(remote_ip),
         .remote_port = 443,
         .protocol = 6
     };
@@ -71,8 +71,8 @@ static void test_each_field_is_part_of_identity(void) {
         keys[i] = original;
     }
 
-    keys[1].us_ip++;
-    keys[2].remote_ip++;
+    keys[1].us_ip.bytes[3]++;
+    keys[2].remote_ip.bytes[3]++;
     keys[3].remote_port++;
     keys[4].protocol = 17;
 
@@ -98,8 +98,8 @@ static void test_padding_does_not_change_identity(void) {
     memset(&a, 0xAA, sizeof a);
     memset(&b, 0xBB, sizeof b);
 
-    a.us_ip = b.us_ip = 0xC000020A;
-    a.remote_ip = b.remote_ip = 0xC6336414;
+    a.us_ip = b.us_ip = ip_addr_v4(0xC000020A);
+    a.remote_ip = b.remote_ip = ip_addr_v4(0xC6336414);
     a.remote_port = b.remote_port = 443;
     a.protocol = b.protocol = 6;
 
