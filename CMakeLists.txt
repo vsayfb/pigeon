@@ -27,6 +27,7 @@ add_library(pigeon_core STATIC
         src/proto/transport.c
         src/proto/packet.c
         src/proto/pktdump.c
+        src/flow/flow_table.c
 )
 target_link_libraries(pigeon_core PUBLIC ${PCAP_LIBRARY})
 
@@ -83,3 +84,7 @@ endif()
 
 add_executable(test_netif_stub tests/unit/test_netif_stub.c src/net/netif_stub.c)
 add_test(NAME netif_stub COMMAND test_netif_stub)
+
+add_executable(test_flow_table tests/unit/test_flow_table.c)
+target_link_libraries(test_flow_table PRIVATE pigeon_core)
+add_test(NAME flow_table COMMAND test_flow_table)
