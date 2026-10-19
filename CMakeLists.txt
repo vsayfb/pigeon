@@ -124,7 +124,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(test_capture_tick PRIVATE
             -Wl,--wrap=pcap_open_live -Wl,--wrap=pcap_datalink
             -Wl,--wrap=pcap_get_selectable_fd -Wl,--wrap=pcap_setnonblock
-            -Wl,--wrap=pcap_dispatch -Wl,--wrap=pcap_breakloop
+            -Wl,--wrap=pcap_dispatch -Wl,--wrap=pcap_geterr -Wl,--wrap=pcap_breakloop
             -Wl,--wrap=pcap_close -Wl,--wrap=poll -Wl,--wrap=time)
     add_test(NAME capture_tick COMMAND test_capture_tick)
 endif()

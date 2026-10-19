@@ -18,6 +18,9 @@ struct trampoline {
 static pcap_t *volatile active_handle;
 static volatile sig_atomic_t stop_requested;
 
+/* Local failures are already reported; do not ask libpcap for their errors. */
+#define CAPTURE_LOCAL_ERROR (-1000)
+
 /* libpcap handler; forwards each packet to the caller's callback. */
 static void on_pcap_packet(u_char *arg, const struct pcap_pkthdr *hdr,
                            const u_char *bytes) {
@@ -52,13 +55,19 @@ static int install_stop_handler(int signo, struct sigaction *old) {
 
 static int run_live_ticks(pcap_t *handle, struct trampoline *context,
                            capture_tick_cb tick) {
-    char error[PCAP_ERRBUF_SIZE];
+    char error[PCAP_ERRBUF_SIZE] = "";
     const int fd = pcap_get_selectable_fd(handle);
 
-    if (fd == -1 || pcap_setnonblock(handle, 1, error) == -1) {
-        fprintf(stderr, "capture requires a selectable nonblocking descriptor\n");
+    if (fd == -1) {
+        fprintf(stderr, "capture has no selectable descriptor\n");
 
-        return PCAP_ERROR;
+        return CAPTURE_LOCAL_ERROR;
+    }
+
+    if (pcap_setnonblock(handle, 1, error) == -1) {
+        fprintf(stderr, "pcap_setnonblock: %s\n", error[0] ? error : "failed without an error message");
+
+        return CAPTURE_LOCAL_ERROR;
     }
 
     struct pollfd descriptor = { .fd = fd, .events = POLLIN };
@@ -79,7 +88,7 @@ static int run_live_ticks(pcap_t *handle, struct trampoline *context,
         if (now == (time_t)-1) {
             perror("capture clock");
 
-            return PCAP_ERROR;
+            return CAPTURE_LOCAL_ERROR;
         }
 
         tick((int64_t)now, context->user);
@@ -90,13 +99,35 @@ static int run_live_ticks(pcap_t *handle, struct trampoline *context,
             if (ready == -1 && errno != EINTR) {
                 perror("capture poll");
 
-                return PCAP_ERROR;
+                return CAPTURE_LOCAL_ERROR;
+            }
+
+            if (stop_requested) {
+                break;
             }
 
             if (ready > 0 && (descriptor.revents & (POLLERR | POLLHUP | POLLNVAL))) {
-                fprintf(stderr, "capture descriptor failed\n");
+                /* A read can expose the backend's reason, e.g. an interface
+                 * going down. Never read a descriptor poll identified as invalid. */
+                if (!(descriptor.revents & POLLNVAL)) {
+                    const int result = pcap_dispatch(handle, 64, on_pcap_packet, (u_char *)context);
 
-                return PCAP_ERROR;
+                    if (result < 0) {
+                        return result;
+                    }
+
+                    if (stop_requested) {
+                        break;
+                    }
+                }
+
+                fprintf(stderr, "capture poll: fd=%d revents=0x%x%s%s%s\n", fd,
+                        (unsigned short)descriptor.revents,
+                        descriptor.revents & POLLERR ? " error" : "",
+                        descriptor.revents & POLLHUP ? " hangup" : "",
+                        descriptor.revents & POLLNVAL ? " invalid descriptor" : "");
+
+                return CAPTURE_LOCAL_ERROR;
             }
         }
     }
@@ -152,13 +183,18 @@ static int run_loop(pcap_t *handle, capture_cb cb, capture_tick_cb tick, void *u
     sigaction(SIGTERM, &old_term, NULL);
     active_handle = NULL;
 
-    if (rc == PCAP_ERROR) {
-        fprintf(stderr, "pcap_loop: %s\n", pcap_geterr(handle));
+    const int failed = rc < 0 && rc != PCAP_ERROR_BREAK;
+
+    if (failed && rc != CAPTURE_LOCAL_ERROR) {
+        const char *error = pcap_geterr(handle);
+
+        fprintf(stderr, "%s: %s\n", tick == NULL ? "pcap_loop" : "pcap_dispatch",
+                error != NULL && error[0] ? error : "capture failed without an error message");
     }
 
     pcap_close(handle);
 
-    return rc == PCAP_ERROR ? -1 : 0;
+    return failed ? -1 : 0;
 }
 
 
