@@ -31,6 +31,7 @@ add_library(pigeon_core STATIC
         src/flow/flow_table.c
         src/flow/flow.c
         src/store/store.c
+        src/dns/dns_parse.c
 )
 target_link_libraries(pigeon_core PUBLIC ${PCAP_LIBRARY} SQLite::SQLite3)
 
@@ -119,3 +120,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             -Wl,--wrap=pcap_close -Wl,--wrap=poll -Wl,--wrap=time)
     add_test(NAME capture_tick COMMAND test_capture_tick)
 endif()
+
+add_executable(test_dns_parse tests/unit/test_dns_parse.c)
+target_compile_definitions(test_dns_parse PRIVATE
+        PIGEON_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
+target_link_libraries(test_dns_parse PRIVATE pigeon_core)
+add_test(NAME dns_parse COMMAND test_dns_parse)
+
+add_executable(fuzz_dns_parse tests/fuzz/fuzz_dns_parse.c)
+target_link_libraries(fuzz_dns_parse PRIVATE pigeon_core)

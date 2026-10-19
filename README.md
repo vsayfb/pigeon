@@ -73,3 +73,23 @@ waiting for wall-clock time.
 
 The build requires `libsqlite3-dev` and `libpcap-dev` on Debian/Ubuntu.
 See [docs/SCHEMA.md](docs/SCHEMA.md) for the schema and write semantics.
+
+DNS response decoding is implemented independently in `src/dns/dns_parse.[ch]`.
+It extracts IN-class A records, follows CNAME chains, and decodes compressed
+names. Results own their lowercase names and retain the minimum chain TTL.
+Complete records remain available when a later answer is truncated. The parser
+bounds questions, answer records, name walks, and caller-provided output.
+It supports printable ASCII labels; binary labels requiring escaped display
+are not supported. Authority and additional sections are ignored.
+DNS cache, SQLite persistence of DNS mappings, and flow naming are not wired yet.
+
+Synthetic query/reply fixtures use RFC 5737 addresses and valid checksums.
+Regenerate them with:
+
+```sh
+python3 tests/fixtures/make_dns_a_record.py
+python3 tests/fixtures/make_dns_compressed.py
+```
+
+Parser tests replay both fixtures. See [tests/fuzz/README.md](tests/fuzz/README.md)
+for deterministic and coverage-guided fuzzing commands.
