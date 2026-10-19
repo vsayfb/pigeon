@@ -8,6 +8,21 @@
 struct flow_table;
 struct flow_entry;
 
+/* Pending payload traffic and absolute observation times in Unix seconds. */
+struct flow_delta {
+    uint64_t packets_out;
+    uint64_t packets_in;
+    uint64_t bytes_out;
+    uint64_t bytes_in;
+    int64_t first_seen;
+    int64_t last_seen;
+};
+
+/* Called before capacity eviction. The entry is borrowed for the call.
+ * Returns 0 to allow eviction, or -1 with errno set to preserve the entry.
+ * The callback must not modify the table or retain the entry pointer. */
+typedef int (*flow_evict_cb)(const struct flow_entry *entry, void *user);
+
 /*
  * Allocates an empty table with bucket_count buckets. Entries use separate
  * chaining; bucket_count controls distribution, not the number of entries.
@@ -38,7 +53,8 @@ struct flow_entry *flow_table_find(const struct flow_table *table,
  *
  * Returns the entry on success. Returns NULL with errno set to ENOMEM on
  * allocation failure, leaving the table unchanged. Allocation precedes
- * eviction, so allocation failure never removes an entry.
+ * eviction, so allocation failure never removes an entry. An eviction
+ * callback failure also returns NULL, preserving the table and its errno.
  */
 struct flow_entry *flow_table_insert(struct flow_table *table,
                                      const struct flow_key *key);
@@ -70,5 +86,16 @@ const struct flow_entry *flow_table_oldest(const struct flow_table *table);
 /* Returns the neighboring borrowed entry, or NULL at that end of the list. */
 const struct flow_entry *flow_entry_older(const struct flow_entry *entry);
 const struct flow_entry *flow_entry_newer(const struct flow_entry *entry);
+
+/* Sets an optional capacity-eviction callback and its borrowed context.
+ * NULL allows eviction without notification. Removal and destruction do
+ * not invoke this callback. */
+void flow_table_set_eviction_handler(struct flow_table *table, flow_evict_cb cb, void *user);
+
+/* Returns borrowed counters, valid for the entry's lifetime. */
+const struct flow_delta *flow_entry_delta(const struct flow_entry *entry);
+
+/* Copies delta into the entry. Does not change recency. */
+void flow_entry_set_delta(struct flow_entry *entry, const struct flow_delta *delta);
 
 #endif

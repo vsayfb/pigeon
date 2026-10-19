@@ -5,6 +5,7 @@
 
 struct flow_entry {
     struct flow_key key;
+    struct flow_delta delta;
     struct flow_entry *next;
 
     struct flow_entry *newer;
@@ -19,6 +20,9 @@ struct flow_table {
 
     struct flow_entry *newest;
     struct flow_entry *oldest;
+
+    flow_evict_cb on_evict;
+    void *evict_user;
 };
 
 static void unlink_recency(struct flow_table *table, struct flow_entry *entry) {
@@ -82,6 +86,9 @@ struct flow_table *flow_table_create(size_t bucket_count, size_t capacity) {
     table->newest = NULL;
     table->oldest = NULL;
 
+    table->on_evict = NULL;
+    table->evict_user = NULL;
+
     return table;
 }
 
@@ -134,8 +141,19 @@ struct flow_entry *flow_table_insert(struct flow_table *table,
     }
 
     entry->key = *key;
+    entry->delta = (struct flow_delta){ 0 };
 
     if (table->count == table->capacity) {
+        if (table->on_evict != NULL &&
+            table->on_evict(table->oldest, table->evict_user) == -1) {
+            const int saved_errno = errno;
+
+            free(entry);
+            errno = saved_errno;
+
+            return NULL;
+        }
+
         flow_table_remove(table, &table->oldest->key);
     }
 
@@ -213,4 +231,17 @@ struct flow_entry *flow_table_touch(struct flow_table *table,
     }
 
     return entry;
+}
+
+void flow_table_set_eviction_handler(struct flow_table *table, flow_evict_cb cb, void *user) {
+    table->on_evict = cb;
+    table->evict_user = user;
+}
+
+const struct flow_delta *flow_entry_delta(const struct flow_entry *entry) {
+    return &entry->delta;
+}
+
+void flow_entry_set_delta(struct flow_entry *entry, const struct flow_delta *delta) {
+    entry->delta = *delta;
 }
