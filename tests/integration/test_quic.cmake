@@ -1,0 +1,17 @@
+string(RANDOM LENGTH 12 ALPHABET abcdef0123456789 suffix)
+set(database "${BINARY_DIR}/quic-${suffix}.db")
+foreach(pass RANGE 1 2)
+    execute_process(COMMAND "${PIGEON}" --verbose --db "${database}"
+        --local-ip 192.0.2.10 --local-ip 2001:db8::10 -r "${FIXTURE}"
+        RESULT_VARIABLE result OUTPUT_VARIABLE output ERROR_VARIABLE errors)
+    if(NOT result EQUAL 0)
+        file(REMOVE "${database}" "${database}-wal" "${database}-shm")
+        message(FATAL_ERROR "QUIC replay failed: ${result}\n${output}\n${errors}")
+    endif()
+    string(REGEX MATCHALL "label=QUIC\\(UDP\\)" labels "${output}")
+    list(LENGTH labels count)
+    if(NOT count EQUAL 2 OR NOT errors MATCHES "pigeon tracked 4 conversations")
+        message(FATAL_ERROR "Expected two classified UDP rows and two ordinary UDP rows\n${output}\n${errors}")
+    endif()
+endforeach()
+file(REMOVE "${database}" "${database}-wal" "${database}-shm")

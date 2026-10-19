@@ -119,7 +119,7 @@ sudo ./build/pigeon --db /tmp/pigeon.db
 ```
 
 The viewer needs read access to the database and its SQLite sidecar files. It
-opens an existing schema-version-4 or -5 database read-only, never creates or migrates
+opens an existing schema-version-4, -5 or -6 database read-only, never creates or migrates
 it, and does not require capture privileges. Quitting the viewer leaves capture
 running. `--once` prints a snapshot without requiring an interactive terminal.
 
@@ -223,7 +223,7 @@ and SQLite. Saved mappings reload at startup and expire according to the minimum
 CNAME/A TTL. Flows look up names on observation and at flush; a late reply can
 name an already flushed conversation without adding its counters again.
 Verbose conversation summaries include `name=...` (`name=-` when unknown).
-Existing schema-version-1/2/3/4 databases migrate transactionally to version 5.
+Existing schema-version-1/2/3/4/5 databases migrate transactionally to version 6.
 
 The cache keeps the last observed name for a shared IP; stored conversations
 retain their first assigned name. Plaintext UDP/53 A and AAAA responses are learned over IPv4 or IPv6;
@@ -294,9 +294,9 @@ bytes for IPv4 and IPv6 echo/errors, four for other ICMPv6 message types. Error
 payloads include the quoted packet; these totals represent control traffic,
 not application data. Type/code appear in verbose dumps, not in persisted keys.
 
-The collector migrates schema v4 to v5 transactionally on its next start,
-preserving existing observations and DNS data. Both updated viewers accept v4
-and v5; older GUI binaries need rebuilding before reading v5.
+The collector migrates older schemas to v6 transactionally on its next start,
+preserving existing observations and DNS data. Both updated viewers accept v4,
+v5 and v6; older GUI binaries need rebuilding before reading the new schema.
 
 Replay both families without capture privileges:
 
@@ -306,3 +306,39 @@ Replay both families without capture privileges:
 ```
 
 Regenerate the fixture with `python3 tests/fixtures/make_icmp.py`.
+
+## QUIC classification
+
+UDP aggregates can display `QUIC (UDP)` when sufficient handshake-header evidence
+has been observed. Transport protocol remains 17, and the conversation key and
+payload counters do not change. The UDP filter includes classified QUIC traffic.
+The schema-v6 `quic` flag is persisted with a sticky upsert: later unclassified
+packets or a collector restart cannot remove a previously observed classification.
+Old observations migrate with `quic=0`; UDP port 443 does not imply QUIC.
+
+The detector validates the first long-header packet for QUIC v1 or v2, including
+CID bounds, token/packet lengths and sufficient protected bytes. It seeds a
+candidate only from a fully captured Initial datagram of at least 1200 bytes
+with a source CID of at least eight bytes. A valid Initial/Handshake in the
+opposite direction, on the same local UDP port, must use that source CID as its
+destination CID within 30 seconds. A bounded candidate is held per aggregate;
+interleaved handshakes may conservatively go unidentified.
+
+Short-only captures, zero/short source IDs, unknown versions, unsupported packet
+types and insufficient evidence remain UDP. This is header-based inference,
+not cryptographic validation or payload decryption. It does not imply HTTP/3.
+The label means QUIC was observed somewhere in the aggregate; its lifetime byte
+totals can also include other UDP traffic sharing the same aggregate identity.
+
+Implementation references: [QUIC v1](https://www.rfc-editor.org/rfc/rfc9000.html#section-17.2),
+[QUIC v2](https://www.rfc-editor.org/rfc/rfc9369.html#section-3.2), and
+[header protection](https://www.rfc-editor.org/rfc/rfc9001.html#section-5.4.2).
+
+```sh
+./build/pigeon --verbose --local-ip 192.0.2.10 --local-ip 2001:db8::10 \
+  -r tests/fixtures/quic_conversations.pcap
+```
+
+The fixture deliberately contains synthetic header evidence with opaque test
+bodies, not a cryptographically valid QUIC exchange. Regenerate it with
+`python3 tests/fixtures/make_quic.py`.

@@ -117,7 +117,7 @@ static int initialize_schema(struct store *store) {
         if (execute(store, STORE_MIGRATE_V2_SQL) == -1) {
             goto error;
         }
-    } else if (version != 3 && version != 4 && version != SCHEMA_VERSION) {
+    } else if (version != 3 && version != 4 && version != 5 && version != SCHEMA_VERSION) {
         snprintf(store->error, sizeof store->error,
                  "unsupported schema version %d (expected %d)", version, SCHEMA_VERSION);
         goto error;
@@ -128,6 +128,10 @@ static int initialize_schema(struct store *store) {
     }
 
     if (version >= 1 && version <= 4 && execute(store, STORE_MIGRATE_V4_SQL) == -1) {
+        goto error;
+    }
+
+    if (version >= 1 && version <= 5 && execute(store, STORE_MIGRATE_V5_SQL) == -1) {
         goto error;
     }
 
@@ -319,6 +323,10 @@ static int write_row(struct store *store, const struct store_row *row) {
              : sqlite3_bind_text(store->upsert, 11, row->remote_name, -1, SQLITE_TRANSIENT);
     }
 
+    if (rc == SQLITE_OK) {
+        rc = sqlite3_bind_int(store->upsert, 13, row->quic);
+    }
+
     if (rc != SQLITE_OK || sqlite3_step(store->upsert) != SQLITE_DONE) {
         return fail(store, "upsert conversation");
     }
@@ -392,6 +400,7 @@ int store_lookup(struct store *store, const struct flow_key *key, struct store_r
         row.delta.packets_in = (uint64_t)sqlite3_column_int64(store->lookup, 1);
         row.delta.bytes_out = (uint64_t)sqlite3_column_int64(store->lookup, 2);
         row.delta.bytes_in = (uint64_t)sqlite3_column_int64(store->lookup, 3);
+        row.quic = sqlite3_column_int(store->lookup, 7);
         row.delta.first_seen = sqlite3_column_int64(store->lookup, 4);
         row.delta.last_seen = sqlite3_column_int64(store->lookup, 5);
 

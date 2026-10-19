@@ -14,11 +14,12 @@ struct store_row {
     struct flow_key key;
     struct flow_delta delta;
     char remote_name[STORE_NAME_LEN];
+    int quic; /* QUIC observed within this UDP aggregate; not an identity field */
 };
 
 /*
  * Opens or creates path, or an isolated in-memory database for ":memory:".
- * Creates schema version 5 and migrates versions 1/2/3/4; rejects
+ * Creates schema version 6 and migrates versions 1/2/3/4/5; rejects
  * unsupported versions. File databases use WAL and synchronous=FULL.
  * The caller owns the store and releases it with store_close(). error must
  * provide STORE_ERROR_LEN writable bytes. No database handle is borrowed.

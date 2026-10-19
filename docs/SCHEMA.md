@@ -1,14 +1,15 @@
 # SQLite schema
 
-Schema version: **5**, stored in `PRAGMA user_version`.
+Schema version: **6**, stored in `PRAGMA user_version`.
 
 The storage module creates the schema only when version is zero and the
-existing database has no application objects. Versions 1, 2, 3 and 4 migrate
+existing database has no application objects. Versions 1, 2, 3, 4 and 5 migrate
 transactionally: version 1 first gains the DNS table, then integer IPv4 keys
 are converted to 4-byte network-order blobs. Version 3 also accepts 16-byte
 IPv6 keys. Version 4 adds application to the conversation key; existing rows
 receive an empty application because historical ownership is unavailable.
 Version 5 adds ICMP (1) and ICMPv6 (58), retaining the same key and columns.
+Version 6 adds a `quic` metadata flag with a default of zero.
 Totals, names, DNS mappings and timestamps are preserved. Other versions are
 rejected. A failed migration restores the schema, rows and user version.
 Opening a versioned database also prepares the
@@ -35,6 +36,7 @@ individual TCP connection. The table uses `WITHOUT ROWID` and this composite pri
 | `remote_ip` | BLOB | Remote IP, same byte length/family as local IP |
 | `remote_port` | INTEGER | Remote endpoint's port, 0–65535; ICMP uses a zero sentinel |
 | `protocol` | INTEGER | ICMP = 1, TCP = 6, UDP = 17, ICMPv6 = 58 |
+| `quic` | INTEGER NOT NULL | 0/1: QUIC observed within a UDP aggregate; not part of identity |
 | `application` | TEXT NOT NULL | Executable basename, at most 255 bytes; empty when unresolved |
 | `packets_out` | INTEGER | Cumulative outgoing packet count |
 | `packets_in` | INTEGER | Cumulative incoming packet count |
@@ -145,3 +147,17 @@ the declared IP length and excluding Ethernet padding. A capture missing body
 bytes can still count their declared length when its header is complete. No
 fragment reassembly or checksum validation is performed. Type/code are available
 in verbose packet output and are not separate columns or key fields.
+
+## QUIC metadata (v6)
+
+`quic` is restricted to integer 0 or 1, with 1 allowed only when protocol=17.
+It does not enter the primary key and does not alter byte/packet counting.
+Upserts merge it using `max(existing, incoming)`, preserving observed evidence
+across flushes, eviction, expiry and restarts. Historical rows migrate with zero;
+there is no inference from ports or persisted old byte totals.
+
+The flag is passive header-based classification, not authentication or proof
+that every UDP packet in the aggregate is QUIC. It does not distinguish HTTP/3.
+The collector requires matching bidirectional CID evidence; a failed or missing
+handshake observation leaves the flag unset. Read-only viewers use zero for
+schemas v4/v5 and read the stored flag in v6.

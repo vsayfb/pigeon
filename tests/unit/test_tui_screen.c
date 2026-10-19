@@ -246,6 +246,12 @@ int main(void) {
     CHECK(contains("Up/s"));
     CHECK(contains("--"));
     CHECK(contains("v6.test -> [2001:db8::42]:443/tcp"));
+    snapshot->live[0].key.protocol = 17;
+    snapshot->live[0].quic = 1;
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK(columns_contain(0, 90, "/QUIC(UDP)"));
+    snapshot->live[0].quic = 0;
+
     snapshot->live[0].key.protocol = 58;
     snapshot->live[0].key.remote_port = 0;
     tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);

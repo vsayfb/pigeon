@@ -112,12 +112,15 @@ struct tui_reader *tui_reader_open(const char *path, char error[TUI_ERROR_LEN]) 
     }
 
     const int valid_version = sqlite3_step(version) == SQLITE_ROW &&
-                              (sqlite3_column_int(version, 0) == 4 || sqlite3_column_int(version, 0) == 5);
+                              (sqlite3_column_int(version, 0) == 4 || sqlite3_column_int(version, 0) == 5 ||
+                               sqlite3_column_int(version, 0) == 6);
+
+    const int has_quic = valid_version && sqlite3_column_int(version, 0) == 6;
 
     sqlite3_finalize(version);
 
     if (!valid_version) {
-        snprintf(error, TUI_ERROR_LEN, "schema version 4 or 5 required; run pigeon to create or migrate it");
+        snprintf(error, TUI_ERROR_LEN, "schema version 4, 5 or 6 required; run pigeon to create or migrate it");
         goto error;
     }
 
@@ -131,15 +134,21 @@ struct tui_reader *tui_reader_open(const char *path, char error[TUI_ERROR_LEN]) 
 
     const char *overview = "SELECT count(*),count(DISTINCT remote_ip),"
                            "total(bytes_in),total(bytes_out),max(last_seen) FROM conversations";
-    const char *live = "SELECT " CONVERSATION_COLUMNS " FROM conversations"
+    const char *live_format = "SELECT " CONVERSATION_COLUMNS ",%s FROM conversations"
                        CONVERSATION_FILTER
                        " AND (?4=0 OR last_seen>=?5) AND last_seen<=?6"
                        " ORDER BY last_seen DESC,remote_ip,remote_port,protocol,us_ip,application LIMIT 200";
-    const char *top = "SELECT " CONVERSATION_COLUMNS " FROM conversations"
+    const char *top_format = "SELECT " CONVERSATION_COLUMNS ",%s FROM conversations"
                       CONVERSATION_FILTER
                       " ORDER BY CASE ?4 WHEN 1 THEN bytes_in WHEN 2 THEN bytes_out"
                       " ELSE cast(bytes_in AS REAL)+bytes_out END DESC,"
                       "last_seen DESC,remote_ip,remote_port,protocol,us_ip,application LIMIT 200";
+    char live[2048];
+    char top[2048];
+
+    snprintf(live, sizeof live, live_format, has_quic ? "quic" : "0");
+    snprintf(top, sizeof top, top_format, has_quic ? "quic" : "0");
+
     const char *endpoints = "SELECT remote_ip,name,first_seen,last_seen FROM ("
                             "SELECT remote_ip,coalesce(max(remote_name),'') AS name,"
                             "min(first_seen) AS first_seen,max(last_seen) AS last_seen"
@@ -257,6 +266,12 @@ static int read_conversations(sqlite3_stmt *statement, struct tui_conversation *
 
         row->key.remote_port = (uint16_t)sqlite3_column_int(statement, 2);
         row->key.protocol = (uint8_t)sqlite3_column_int(statement, 3);
+        row->quic = sqlite3_column_int(statement, 12);
+
+        if (sqlite3_column_type(statement, 12) != SQLITE_INTEGER ||
+            (row->quic != 0 && row->quic != 1) || (row->quic && row->key.protocol != 17)) {
+            return -1;
+        }
         row->totals.packets_out = (uint64_t)sqlite3_column_int64(statement, 4);
         row->totals.packets_in = (uint64_t)sqlite3_column_int64(statement, 5);
         row->totals.bytes_out = (uint64_t)sqlite3_column_int64(statement, 6);

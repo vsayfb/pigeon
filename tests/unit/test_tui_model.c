@@ -517,6 +517,45 @@ static void test_icmp_filters(void) {
     CHECK(unlink(path) == 0);
 }
 
+static void test_quic_and_legacy_versions(void) {
+    for (int version = 4; version <= 6; version++) {
+        char path[] = "/tmp/pigeon-tui-quic-XXXXXX";
+        const int fd = mkstemp(path);
+        char error[TUI_ERROR_LEN];
+        sqlite3 *db = NULL;
+
+        CHECK(fd != -1 && close(fd) == 0);
+        CHECK(sqlite3_open(path, &db) == SQLITE_OK);
+        CHECK(sqlite3_exec(db, version == 4 ? STORE_CONVERSATIONS_V4_SQL : STORE_CONVERSATIONS_V5_SQL,
+                           NULL, NULL, NULL) == SQLITE_OK);
+        CHECK(sqlite3_exec(db, STORE_DNS_SCHEMA_SQL
+                          "INSERT INTO conversations VALUES(X'C000020A',X'C6336414',443,17,"
+                          "1,1,100,200,100,110,NULL,'');", NULL, NULL, NULL) == SQLITE_OK);
+
+        const char *sql = version == 4 ? "PRAGMA user_version=4;" :
+                          version == 5 ? "PRAGMA user_version=5;" : STORE_MIGRATE_V5_SQL;
+
+        CHECK(sqlite3_exec(db, sql, NULL, NULL, NULL) == SQLITE_OK);
+        if (version == 6) {
+            CHECK(sqlite3_exec(db, "UPDATE conversations SET quic=1", NULL, NULL, NULL) == SQLITE_OK);
+        }
+
+        struct tui_reader *reader = tui_reader_open(path, error);
+        struct tui_snapshot *snapshot = calloc(1, sizeof *snapshot);
+        struct tui_options options = { .protocol = 17, .recent_seconds = 30 };
+
+        CHECK(reader != NULL && snapshot != NULL);
+        CHECK(tui_reader_refresh(reader, &options, 110, 0, snapshot, error) == 0);
+        CHECK(snapshot->live_count == 1 && snapshot->top_count == 1);
+        CHECK(snapshot->live[0].quic == (version == 6));
+        CHECK(snapshot->top[0].key.protocol == 17 && snapshot->top[0].totals.bytes_out == 100);
+        free(snapshot);
+        tui_reader_close(reader);
+        CHECK(sqlite3_close(db) == SQLITE_OK);
+        CHECK(unlink(path) == 0);
+    }
+}
+
 int main(void) {
     test_snapshot_queries_and_refresh();
     test_reader_never_creates_or_migrates();
@@ -524,6 +563,7 @@ int main(void) {
     test_application_aggregates_and_selection();
     test_live_rates();
     test_icmp_filters();
+    test_quic_and_legacy_versions();
 
     puts("tui_model: ok");
 

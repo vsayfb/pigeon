@@ -3,6 +3,7 @@
 #include <string.h>
 
 #include "proto/packet.h"
+#include "proto/quic.h"
 
 int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
     struct packet_view packet;
@@ -36,6 +37,22 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
 
         if (payload < data || payload > data + size ||
             readable > size - (size_t)(payload - data) || readable > wire) {
+            abort();
+        }
+    }
+
+    if (packet.kind == PACKET_UDP) {
+        struct quic_header header;
+        struct quic_header before;
+
+        memset(&header, 0xab, sizeof header);
+        memcpy(&before, &header, sizeof header);
+
+        if (quic_parse_long(packet.transport.udp.payload, packet.transport.udp.payload_len, &header)) {
+            if (header.dcid_len > QUIC_CID_MAX || header.scid_len > QUIC_CID_MAX) {
+                abort();
+            }
+        } else if (memcmp(&before, &header, sizeof header) != 0) {
             abort();
         }
     }

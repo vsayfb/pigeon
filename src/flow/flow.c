@@ -51,6 +51,7 @@ static void snapshot_row(const struct flow *flow, const struct flow_entry *entry
                           struct store_row *row) {
     row->key = *flow_entry_key(entry);
     row->delta = *flow_entry_delta(entry);
+    row->quic = flow_entry_quic(entry);
 
     const char *name = lookup_name(flow, entry);
 
@@ -222,6 +223,11 @@ int flow_observe(struct flow *flow, const struct packet_view *packet, int64_t no
         if (entry == NULL) {
             return -1;
         }
+    }
+
+    if (packet->kind == PACKET_UDP) {
+        flow_entry_observe_quic(entry, &packet->transport.udp,
+                                 outgoing ? source_port : destination_port, outgoing, now);
     }
 
     struct flow_delta delta = *flow_entry_delta(entry);

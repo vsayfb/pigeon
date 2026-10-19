@@ -111,4 +111,12 @@ void flow_entry_set_name(struct flow_entry *entry, const char *name);
 int flow_entry_name_pending(const struct flow_entry *entry);
 void flow_entry_clear_name_pending(struct flow_entry *entry);
 
+struct udp_view;
+
+/* Sticky metadata: sufficient bidirectional QUIC evidence has been observed.
+ * The bounded candidate lives and expires with its table entry. */
+int flow_entry_quic(const struct flow_entry *entry);
+void flow_entry_observe_quic(struct flow_entry *entry, const struct udp_view *udp,
+                              uint16_t local_port, int outgoing, int64_t now);
+
 #endif

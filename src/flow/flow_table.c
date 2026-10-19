@@ -1,4 +1,6 @@
 #include "flow/flow_table.h"
+#include "proto/quic.h"
+#include "proto/transport.h"
 
 #include <errno.h>
 #include <stdlib.h>
@@ -9,6 +11,8 @@ struct flow_entry {
     struct flow_delta delta;
     char name[FLOW_NAME_LEN];
     int name_pending;
+    int quic;
+    struct quic_probe quic_probe;
     struct flow_entry *next;
 
     struct flow_entry *newer;
@@ -147,6 +151,8 @@ struct flow_entry *flow_table_insert(struct flow_table *table,
     entry->delta = (struct flow_delta){ 0 };
     entry->name[0] = '\0';
     entry->name_pending = 0;
+    entry->quic = 0;
+    entry->quic_probe = (struct quic_probe){ 0 };
 
     if (table->count == table->capacity) {
         if (table->on_evict != NULL &&
@@ -268,4 +274,16 @@ int flow_entry_name_pending(const struct flow_entry *entry) {
 
 void flow_entry_clear_name_pending(struct flow_entry *entry) {
     entry->name_pending = 0;
+}
+
+int flow_entry_quic(const struct flow_entry *entry) {
+    return entry->quic;
+}
+
+void flow_entry_observe_quic(struct flow_entry *entry, const struct udp_view *udp,
+                              uint16_t local_port, int outgoing, int64_t now) {
+    if (!entry->quic && quic_observe(&entry->quic_probe, udp->payload, udp->payload_len,
+                                    udp->payload_wire_len, local_port, outgoing, now)) {
+        entry->quic = 1;
+    }
 }

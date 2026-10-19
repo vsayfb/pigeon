@@ -343,7 +343,7 @@ static void conversation_panel(struct panel p, const struct tui_snapshot *snapsh
         if (protocol_has_ports(row->key.protocol)) {
             snprintf(endpoint, sizeof endpoint, "%s%s%s:%u/%s", row->key.remote_ip.family == 6 ? "[" : "",
                      address, row->key.remote_ip.family == 6 ? "]" : "",
-                     row->key.remote_port, protocol_label(row->key.protocol));
+                     row->key.remote_port, row->quic ? "QUIC(UDP)" : protocol_label(row->key.protocol));
         } else {
             snprintf(endpoint, sizeof endpoint, "%s/%s", address, protocol_label(row->key.protocol));
         }
@@ -555,7 +555,7 @@ static void modal(const struct tui_snapshot *snapshot, const struct tui_screen *
             snprintf(content[count++], 320, "Local IP:");
             snprintf(content[count++], 320, "%s", ip_addr_str(&row->key.us_ip, address));
             if (protocol_has_ports(row->key.protocol)) {
-                snprintf(content[count++], 320, "%s, remote port %u", protocol_name(row->key.protocol), row->key.remote_port);
+                snprintf(content[count++], 320, "%s, remote port %u", row->quic ? "QUIC (UDP)" : protocol_name(row->key.protocol), row->key.remote_port);
             } else {
                 snprintf(content[count++], 320, "%s, no ports", protocol_name(row->key.protocol));
             }

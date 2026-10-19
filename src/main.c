@@ -133,6 +133,10 @@ static void print_conversation(const struct flow_entry *entry, void *user) {
         putchar(byte >= 32 && byte <= 126 ? byte : '?');
     }
 
+    if (row.quic) {
+        fputs(" label=QUIC(UDP)", stdout);
+    }
+
     putchar('\n');
 }
 

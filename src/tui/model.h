@@ -14,7 +14,7 @@ enum tui_live_sort { TUI_LIVE_RECENCY, TUI_LIVE_TOTAL, TUI_LIVE_DOWNLOAD, TUI_LI
 
 struct tui_options {
     char search[TUI_SEARCH_LEN];
-    int protocol;              /* 0, 6 or 17 */
+    int protocol;              /* 0, 1, 6, 17 or 58 */
     int family;                /* 0, 4 or 6 */
     int recent_seconds;        /* zero means all recorded */
     enum tui_sort sort;
@@ -30,6 +30,7 @@ struct tui_conversation {
     double rate_down;
     double rate_up;
     int rates_valid;           /* Live only; at least two samples one second apart */
+    int quic;                  /* classification metadata on UDP */
 };
 
 struct tui_endpoint {
