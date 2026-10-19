@@ -47,7 +47,7 @@ static void text(int y, int x, int width, int attributes, const char *format, ..
 
 /* Trusted glyphs use the wide-character API. Database strings still pass
  * through text()'s ASCII sanitization, so they cannot inject terminal controls. */
-static void direction_icon(int y, int x, int incoming) {
+static void direction_icon_styled(int y, int x, int incoming, int attributes) {
     if (y < 0 || y >= LINES || x < 0 || x >= COLS) {
         return;
     }
@@ -57,15 +57,19 @@ static void direction_icon(int y, int x, int incoming) {
     const wchar_t value[] = { glyph, L'\0' };
     cchar_t icon;
 
-    if (wcwidth(glyph) == 1 && setcchar(&icon, value, A_BOLD, pair, NULL) == OK) {
+    if (wcwidth(glyph) == 1 && setcchar(&icon, value, A_BOLD | attributes, pair, NULL) == OK) {
         mvadd_wch(y, x, &icon);
 
         return;
     }
 
-    attron(A_BOLD | COLOR_PAIR(pair));
+    attron(A_BOLD | attributes | COLOR_PAIR(pair));
     mvaddch(y, x, incoming ? 'v' : '^');
-    attroff(A_BOLD | COLOR_PAIR(pair));
+    attroff(A_BOLD | attributes | COLOR_PAIR(pair));
+}
+
+static void direction_icon(int y, int x, int incoming) {
+    direction_icon_styled(y, x, incoming, 0);
 }
 
 static void traffic_heading(int y, int x, const char *label, int incoming) {
@@ -304,17 +308,17 @@ static void conversation_panel(struct panel p, const struct tui_snapshot *snapsh
 
     const int show_seen = live && p.width >= 80;
     const int application_width = p.width >= (live ? 110 : 80) ? 18 : 12;
-    const int endpoint_width = p.width - 27 - application_width - (show_seen ? 7 : 0);
+    const int endpoint_width = p.width - 30 - application_width - (show_seen ? 7 : 0);
     const struct tui_conversation *rows = live ? snapshot->live : snapshot->top;
     const size_t count = live ? snapshot->live_count : snapshot->top_count;
     const int visible = p.height - 4;
     const size_t selected = state->selected[focus];
     const size_t start = selected >= (size_t)visible ? selected - (size_t)visible + 1 : 0;
 
-    text(p.y + 1, p.x + 1, p.width - 2, A_DIM, "  %-*s %-*s",
+    text(p.y + 1, p.x + 1, p.width - 2, A_DIM, "  IO %-*s %-*s",
          application_width, "Application", endpoint_width, "Endpoint");
 
-    const int down_x = p.x + 5 + application_width + endpoint_width;
+    const int down_x = p.x + 8 + application_width + endpoint_width;
 
     traffic_heading(p.y + 1, down_x, live ? "Down/s" : "Down", 1);
     traffic_heading(p.y + 1, down_x + 11, live ? "Up/s" : "Up", 0);
@@ -353,14 +357,22 @@ static void conversation_panel(struct panel p, const struct tui_snapshot *snapsh
 
         if (show_seen) {
             text(p.y + 2 + i, p.x + 1, p.width - 2, attributes,
-                 "%c %-*.*s %-*.*s %10.10s %10.10s %6.6s", selected == index ? '>' : ' ',
+                 "%c    %-*.*s %-*.*s %10.10s %10.10s %6.6s", selected == index ? '>' : ' ',
                  application_width, application_width, row->key.application[0] ? row->key.application : "unresolved",
                  endpoint_width, endpoint_width, label, down, up, last);
         } else {
             text(p.y + 2 + i, p.x + 1, p.width - 2, attributes,
-                 "%c %-*.*s %-*.*s %10.10s %10.10s", selected == index ? '>' : ' ',
+                 "%c    %-*.*s %-*.*s %10.10s %10.10s", selected == index ? '>' : ' ',
                  application_width, application_width, row->key.application[0] ? row->key.application : "unresolved",
                  endpoint_width, endpoint_width, label, down, up);
+        }
+
+        if (row->totals.packets_in != 0) {
+            direction_icon_styled(p.y + 2 + i, p.x + 3, 1, attributes);
+        }
+
+        if (row->totals.packets_out != 0) {
+            direction_icon_styled(p.y + 2 + i, p.x + 4, 0, attributes);
         }
     }
 
@@ -489,7 +501,7 @@ static void modal(const struct tui_snapshot *snapshot, const struct tui_screen *
             "s: cumulative sort | l: live recency/total/down/up", "r               Live window: 10s / 30s / 120s / all",
             "f               Conversation protocol: any / TCP / UDP", "v               Address family: any / IPv4 / IPv6",
             "p               Pause auto-refresh; collector keeps running", "q / Ctrl-C      Quit viewer; collector keeps running",
-            "Rates are database counter deltas, not NIC speed.", "Totals count transport payload, including retransmissions.",
+            "Rates are database counter deltas, not NIC speed.", "IO: down=incoming, up=outgoing; observed packet directions.",
             "Graphs: old -> new, shared scale; _ is zero, @ is peak.", "No collector heartbeat is stored. Idle is not stopped.",
             "d: details | a: all apps | Esc: clear app filter and search", "Names are recorded DNS associations, not service proof."
         };

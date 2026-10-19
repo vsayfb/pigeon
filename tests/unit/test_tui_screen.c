@@ -109,6 +109,55 @@ static void check_direction_icon(int y, int x, wchar_t expected, short expected_
     CHECK(pair == expected_pair);
 }
 
+static void test_row_directions(void) {
+    struct tui_snapshot *snapshot = calloc(1, sizeof *snapshot);
+    struct tui_options options = { .recent_seconds = 30 };
+    struct tui_screen state = { 0 };
+
+    CHECK(snapshot != NULL);
+    CHECK(resizeterm(40, 180) == OK);
+    snapshot->live_count = snapshot->top_count = 4;
+
+    for (size_t i = 0; i < 4; i++) {
+        struct tui_conversation *row = &snapshot->live[i];
+
+        CHECK(ip_addr_parse("192.0.2.10", &row->key.us_ip) == 0);
+        CHECK(ip_addr_parse("198.51.100.42", &row->key.remote_ip) == 0);
+        row->key.remote_port = 443;
+        row->key.protocol = 6;
+        row->totals.packets_in = i == 0 || i == 2 ? 1 : 0;
+        row->totals.packets_out = i == 1 || i == 2 ? 1 : 0;
+        snapshot->top[i] = *row;
+    }
+
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK(contains("IO"));
+
+    for (int x = 0; x <= 90; x += 90) {
+        check_direction_icon(10, x + 3, L'\u2193', 1);
+        CHECK((mvwinch(curscr, 10, x + 4) & A_CHARTEXT) == ' ');
+        CHECK((mvwinch(curscr, 11, x + 3) & A_CHARTEXT) == ' ');
+        check_direction_icon(11, x + 4, L'\u2191', 2);
+        check_direction_icon(12, x + 3, L'\u2193', 1);
+        check_direction_icon(12, x + 4, L'\u2191', 2);
+        CHECK((mvwinch(curscr, 13, x + 3) & A_CHARTEXT) == ' ');
+        CHECK((mvwinch(curscr, 13, x + 4) & A_CHARTEXT) == ' ');
+    }
+
+    CHECK((mvwinch(curscr, 10, 3) & A_REVERSE) != 0);
+    CHECK((mvwinch(curscr, 10, 93) & A_REVERSE) == 0);
+
+    /* Redrawing cleared counters must erase old row icons. */
+    snapshot->live[0].totals.packets_in = 0;
+    CHECK(resizeterm(16, 60) == OK);
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK((mvwinch(curscr, 10, 3) & A_CHARTEXT) == ' ');
+    check_direction_icon(11, 4, L'\u2191', 2);
+
+    CHECK(resizeterm(40, 180) == OK);
+    free(snapshot);
+}
+
 static void test_ascii_icons(void) {
     CHECK(setlocale(LC_ALL, "C") != NULL);
 
@@ -124,7 +173,14 @@ static void test_ascii_icons(void) {
 
     CHECK(terminal != NULL && snapshot != NULL);
     CHECK(resizeterm(16, 60) == OK);
+    snapshot->live_count = 2;
+    snapshot->live[0].totals.packets_in = snapshot->live[0].totals.packets_out = 1;
+    snapshot->live[1].totals.packets_out = 1;
     tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK((mvwinch(curscr, 10, 3) & A_CHARTEXT) == 'v');
+    CHECK((mvwinch(curscr, 10, 4) & A_CHARTEXT) == '^');
+    CHECK((mvwinch(curscr, 11, 3) & A_CHARTEXT) == ' ');
+    CHECK((mvwinch(curscr, 11, 4) & A_CHARTEXT) == '^');
     CHECK((mvwinch(curscr, 3, 10) & A_CHARTEXT) == 'v');
     CHECK((mvwinch(curscr, 3, 22) & A_CHARTEXT) == '^');
     CHECK(contains("Down/s"));
@@ -322,6 +378,7 @@ int main(void) {
     tui_screen_key(KEY_BTAB, snapshot, &options, &state);
     CHECK(state.focus == 3);
 
+    test_row_directions();
     test_endpoint_abbreviations();
 
     CHECK(resizeterm(10, 40) == OK);

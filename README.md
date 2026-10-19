@@ -124,8 +124,12 @@ it, and does not require capture privileges. Quitting the viewer leaves capture
 running. `--once` prints a snapshot without requiring an interactive terminal.
 
 Cyan `↓` marks incoming/download traffic; green `↑` marks outgoing/upload
-traffic in the overview and column headers. Text labels remain visible, and
-non-Unicode locales use `v` / `^` instead. LAN detection is not implemented.
+traffic in the overview and column headers. Conversation rows also have an
+`IO` column: `↓` for received packets, `↑` for sent packets, and both when both
+directions have been observed. These indicators use cumulative packet counts,
+including zero-payload packets; they do not indicate which side initiated a
+connection or whether traffic is flowing in this refresh interval. Non-Unicode
+locales use `v` / `^` instead. LAN detection is not implemented.
 
 The screen contains Traffic overview, Live traffic, Top Conversations,
 Applications, and New endpoints. Wide terminals show all panels; smaller
