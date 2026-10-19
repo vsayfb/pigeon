@@ -17,6 +17,17 @@
     " AND (?2=0 OR protocol=?2) AND (?3=0 OR length(remote_ip)=?3)" \
     " AND (?7=0 OR application=?8)"
 
+struct live_sample {
+    struct flow_key key;
+    struct flow_delta observed;
+    uint64_t baseline_down;
+    uint64_t baseline_up;
+    double sampled_at;
+    double rate_down;
+    double rate_up;
+    int valid;
+};
+
 struct tui_reader {
     sqlite3 *db;
     sqlite3_stmt *overview;
@@ -34,6 +45,9 @@ struct tui_reader {
     double rate_up;
     struct tui_sample history[TUI_HISTORY];
     size_t history_count;
+    struct live_sample live_samples[TUI_MAX_ROWS];
+    size_t live_sample_count;
+    double live_refreshed_at;
 };
 
 static int read_address(sqlite3_stmt *statement, int column, struct ip_addr *out) {
@@ -282,6 +296,61 @@ static void reset_statements(struct tui_reader *reader) {
     }
 }
 
+static void update_live_rates(struct tui_reader *reader, struct tui_snapshot *snapshot, double now) {
+    struct live_sample next[TUI_MAX_ROWS] = { 0 };
+
+    for (size_t i = 0; i < snapshot->live_count; i++) {
+        struct tui_conversation *row = &snapshot->live[i];
+        struct live_sample *sample = &next[i];
+        const struct live_sample *previous = NULL;
+
+        for (size_t j = 0; j < reader->live_sample_count; j++) {
+            if (flow_key_equal(&row->key, &reader->live_samples[j].key)) {
+                previous = &reader->live_samples[j];
+                break;
+            }
+        }
+
+        const int reset = previous == NULL || now < reader->live_refreshed_at ||
+            row->totals.bytes_in < previous->observed.bytes_in ||
+            row->totals.bytes_out < previous->observed.bytes_out ||
+            row->totals.packets_in < previous->observed.packets_in ||
+            row->totals.packets_out < previous->observed.packets_out ||
+            row->totals.first_seen != previous->observed.first_seen;
+
+        if (reset) {
+            sample->key = row->key;
+            sample->baseline_down = row->totals.bytes_in;
+            sample->baseline_up = row->totals.bytes_out;
+            sample->sampled_at = now;
+        } else {
+            *sample = *previous;
+
+            const double elapsed = now - sample->sampled_at;
+
+            if (elapsed >= 1.0) {
+                /* Subtract integer counters before conversion: small changes
+                 * must remain visible even when stored totals exceed 2^53. */
+                sample->rate_down = (double)(row->totals.bytes_in - sample->baseline_down) / elapsed;
+                sample->rate_up = (double)(row->totals.bytes_out - sample->baseline_up) / elapsed;
+                sample->baseline_down = row->totals.bytes_in;
+                sample->baseline_up = row->totals.bytes_out;
+                sample->sampled_at = now;
+                sample->valid = 1;
+            }
+        }
+
+        sample->observed = row->totals;
+        row->rate_down = sample->rate_down;
+        row->rate_up = sample->rate_up;
+        row->rates_valid = sample->valid;
+    }
+
+    memcpy(reader->live_samples, next, snapshot->live_count * sizeof next[0]);
+    reader->live_sample_count = snapshot->live_count;
+    reader->live_refreshed_at = now;
+}
+
 int tui_reader_refresh(struct tui_reader *reader, const struct tui_options *options,
                         int64_t now, double monotonic_seconds, struct tui_snapshot *out,
                         char error[TUI_ERROR_LEN]) {
@@ -409,6 +478,8 @@ int tui_reader_refresh(struct tui_reader *reader, const struct tui_options *opti
             .seconds = elapsed
         };
     }
+
+    update_live_rates(reader, snapshot, monotonic_seconds);
 
     snapshot->rate_down = reader->rate_down;
     snapshot->rate_up = reader->rate_up;

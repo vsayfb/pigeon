@@ -25,6 +25,9 @@ struct tui_conversation {
     struct flow_key key;
     struct flow_delta totals;
     char name[254];
+    double rate_down;
+    double rate_up;
+    int rates_valid;           /* Live only; at least two samples one second apart */
 };
 
 struct tui_endpoint {
@@ -92,6 +95,9 @@ void tui_reader_close(struct tui_reader *reader);
  * selection filters only conversations. Overview and Applications are unfiltered;
  * Applications groups all stored rows before ranking (not just the top 200).
  * Rates are estimated from database counter deltas, not packet timestamps.
+ * Live row rates retain per-key baselines while a row remains visible; newly
+ * visible rows wait for a second sample. Counter resets invalidate the rate.
+ * Subsecond refreshes retain the last estimate without moving its baseline.
  * Returns 0 on success or -1 with error set, leaving out and rate history
  * unchanged. No returned data borrows SQLite memory. */
 int tui_reader_refresh(struct tui_reader *reader, const struct tui_options *options,

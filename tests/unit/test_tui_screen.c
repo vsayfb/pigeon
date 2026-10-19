@@ -5,14 +5,14 @@
 #include "../t.h"
 #include "tui/screen.h"
 
-static int contains(const char *needle) {
+static int columns_contain(int start, int columns, const char *needle) {
     char line[256];
 
     for (int y = 0; y < LINES; y++) {
-        const int width = COLS < 255 ? COLS : 255;
+        const int width = columns < 255 ? columns : 255;
 
         for (int x = 0; x < width; x++) {
-            line[x] = (char)(mvwinch(curscr, y, x) & A_CHARTEXT);
+            line[x] = (char)(mvwinch(curscr, y, start + x) & A_CHARTEXT);
         }
 
         line[width] = '\0';
@@ -23,6 +23,76 @@ static int contains(const char *needle) {
     }
 
     return 0;
+}
+
+static int contains(const char *needle) {
+    return columns_contain(0, COLS, needle);
+}
+
+static void test_endpoint_abbreviations(void) {
+    struct tui_snapshot *snapshot = calloc(1, sizeof *snapshot);
+    struct tui_options options = { .recent_seconds = 30 };
+    struct tui_screen state = { 0 };
+    const char *long_name = "rr1--sn-a5mekn7s.something-long.googlevideo.example.test";
+
+    CHECK(snapshot != NULL);
+    CHECK(resizeterm(40, 180) == OK);
+    snapshot->live_count = snapshot->top_count = snapshot->endpoint_count = 1;
+    CHECK(ip_addr_parse("192.0.2.10", &snapshot->live[0].key.us_ip) == 0);
+    CHECK(ip_addr_parse("173.194.10.38", &snapshot->live[0].key.remote_ip) == 0);
+    snapshot->live[0].key.remote_port = 65535;
+    snapshot->live[0].key.protocol = 6;
+    strcpy(snapshot->live[0].name, long_name);
+    snapshot->top[0] = snapshot->live[0];
+    snapshot->endpoints[0].ip = snapshot->live[0].key.remote_ip;
+    strcpy(snapshot->endpoints[0].name, long_name);
+
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK(columns_contain(0, 90, " -> 173.194.10.38:65535/tcp"));
+    CHECK(columns_contain(90, 90, " -> 173.194.10.38:65535/tcp"));
+    CHECK(columns_contain(0, 90, "..."));
+    CHECK(columns_contain(90, 90, "..."));
+    CHECK(contains(" -> 173.194.10.38"));
+    CHECK(!contains(long_name));
+
+    tui_screen_key('d', snapshot, &options, &state);
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK(contains(long_name));
+    tui_screen_key(27, snapshot, &options, &state);
+
+    CHECK(ip_addr_parse("2001:db8::10", &snapshot->live[0].key.us_ip) == 0);
+    CHECK(ip_addr_parse("2001:db8::42", &snapshot->live[0].key.remote_ip) == 0);
+    snapshot->top[0] = snapshot->live[0];
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK(columns_contain(0, 90, " -> [2001:db8::42]:65535/tcp"));
+    CHECK(columns_contain(90, 90, " -> [2001:db8::42]:65535/tcp"));
+
+    snapshot->live[0].name[0] = '\0';
+    snapshot->top[0] = snapshot->live[0];
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK(columns_contain(0, 90, "[2001:db8::42]:65535/tcp"));
+    CHECK(!columns_contain(0, 90, " -> "));
+
+    CHECK(ip_addr_parse("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", &snapshot->live[0].key.remote_ip) == 0);
+    strcpy(snapshot->live[0].name, long_name);
+    CHECK(resizeterm(16, 60) == OK);
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK(contains("..."));
+    CHECK(contains(":65535/tcp"));
+
+    tui_screen_key('d', snapshot, &options, &state);
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+
+    char first_line[53];
+
+    memcpy(first_line, long_name, 52);
+    first_line[52] = '\0';
+    CHECK(contains(first_line));
+    CHECK(contains(long_name + 52));
+    tui_screen_key(27, snapshot, &options, &state);
+
+    CHECK(resizeterm(40, 180) == OK);
+    free(snapshot);
 }
 
 int main(void) {
@@ -61,7 +131,9 @@ int main(void) {
     CHECK(contains("New endpoints"));
     CHECK(contains("Applications | all recorded"));
     CHECK(contains("firefox"));
-    CHECK(contains("v6.test -> 2001:db8::42"));
+    CHECK(contains("Down/s"));
+    CHECK(contains("Up/s"));
+    CHECK(contains("--"));
     CHECK(contains("v6.test -> [2001:db8::42]:443/tcp"));
     CHECK(contains("5s | 0..1.0 KiB/s"));
     CHECK(contains("@_"));
@@ -103,6 +175,26 @@ int main(void) {
     tui_screen_key(KEY_DOWN, snapshot, &options, &state);
     tui_screen_key(27, snapshot, &options, &state);
     CHECK(state.details == 0);
+
+    state.focus = 0;
+    snapshot->live[0].rates_valid = 1;
+    snapshot->live[0].rate_down = 2048;
+    snapshot->live[0].rate_up = 512;
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK(contains("Down/s"));
+    CHECK(contains("2.0 KiB"));
+    CHECK(contains("512 B"));
+    tui_screen_key('d', snapshot, &options, &state);
+
+    for (int i = 0; i < 5; i++) {
+        tui_screen_key(KEY_DOWN, snapshot, &options, &state);
+    }
+
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK(contains("Download rate: 2.0 KiB/s"));
+    CHECK(contains("Upload rate:   512 B/s"));
+    tui_screen_key(27, snapshot, &options, &state);
+    state.focus = 1;
 
     CHECK(tui_screen_key('\t', snapshot, &options, &state) == 0);
     CHECK(state.focus == 2);
@@ -156,6 +248,8 @@ int main(void) {
     CHECK(state.focus == 0);
     tui_screen_key(KEY_BTAB, snapshot, &options, &state);
     CHECK(state.focus == 3);
+
+    test_endpoint_abbreviations();
 
     CHECK(resizeterm(10, 40) == OK);
     tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);

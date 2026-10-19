@@ -102,6 +102,75 @@ static size_t panel_count(const struct tui_snapshot *snapshot, int focus) {
          : focus == 2 ? snapshot->application_count : snapshot->endpoint_count;
 }
 
+static void abbreviate(const char *value, size_t width, size_t suffix, char out[384]) {
+    const size_t length = strlen(value);
+
+    if (length <= width) {
+        snprintf(out, 384, "%s", value);
+
+        return;
+    }
+
+    if (width <= 3) {
+        memset(out, '.', width);
+        out[width] = '\0';
+
+        return;
+    }
+
+    size_t right = (width - 2) / 2;
+
+    if (right < suffix) {
+        right = suffix;
+    }
+
+    if (right > width - 4) {
+        right = width - 4;
+    }
+
+    const size_t left = width - 3 - right;
+
+    memcpy(out, value, left);
+    memcpy(out + left, "...", 3);
+    memcpy(out + left + 3, value + length - right, right);
+    out[width] = '\0';
+}
+
+/* Spend the available columns on the address first. If even the address
+ * cannot fit, make its abbreviation explicit; details retain the full value. */
+static void endpoint_label(const char *name, const char *endpoint, int width, char out[384]) {
+    if (width <= 0) {
+        out[0] = '\0';
+
+        return;
+    }
+
+    const size_t available = width < 384 ? (size_t)width : 383;
+    const size_t endpoint_length = strlen(endpoint);
+    const size_t name_length = strlen(name);
+    const size_t minimum_name = name_length < 7 ? name_length : 7;
+
+    if (name[0] == '\0' || available < endpoint_length + 4 + minimum_name) {
+        const char *port = strrchr(endpoint, ':');
+        const size_t suffix = port != NULL && strchr(port, '/') != NULL
+                              ? strlen(port) + (port > endpoint && port[-1] == ']') : 0;
+
+        abbreviate(endpoint, available, suffix, out);
+
+        return;
+    }
+
+    char shortened[384];
+
+    abbreviate(name, available - endpoint_length - 4, 0, shortened);
+
+    const size_t shortened_length = strlen(shortened);
+
+    memcpy(out, shortened, shortened_length);
+    memcpy(out + shortened_length, " -> ", 4);
+    memcpy(out + shortened_length + 4, endpoint, endpoint_length + 1);
+}
+
 static void overview(struct panel p, const struct tui_snapshot *snapshot, int64_t now) {
     draw_border(p, "Traffic overview | all recorded payload", 0);
 
@@ -196,22 +265,30 @@ static void conversation_panel(struct panel p, const struct tui_snapshot *snapsh
 
     draw_border(p, title, state->focus == focus);
 
-    const int application_width = p.width >= 80 ? 18 : 12;
-    const int endpoint_width = p.width - (live ? 24 : 26) - application_width - 1;
+    const int show_seen = live && p.width >= 80;
+    const int application_width = p.width >= (live ? 110 : 80) ? 18 : 12;
+    const int endpoint_width = p.width - 27 - application_width - (show_seen ? 7 : 0);
     const struct tui_conversation *rows = live ? snapshot->live : snapshot->top;
     const size_t count = live ? snapshot->live_count : snapshot->top_count;
     const int visible = p.height - 4;
     const size_t selected = state->selected[focus];
     const size_t start = selected >= (size_t)visible ? selected - (size_t)visible + 1 : 0;
 
-    text(p.y + 1, p.x + 1, p.width - 2, A_DIM,
-         live ? "  %-*s %-*s Proto  Port   Seen" : "  %-*s %-*s       Down         Up",
-         application_width, "Application", endpoint_width, "Endpoint");
+    if (show_seen) {
+        text(p.y + 1, p.x + 1, p.width - 2, A_DIM,
+             "  %-*s %-*s     Down/s       Up/s   Seen",
+             application_width, "Application", endpoint_width, "Endpoint");
+    } else {
+        text(p.y + 1, p.x + 1, p.width - 2, A_DIM,
+             live ? "  %-*s %-*s     Down/s       Up/s" : "  %-*s %-*s       Down         Up",
+             application_width, "Application", endpoint_width, "Endpoint");
+    }
 
     for (int i = 0; i < visible && start + (size_t)i < count; i++) {
         const size_t index = start + (size_t)i;
         const struct tui_conversation *row = &rows[index];
         char address[IP_ADDR_STR_LEN];
+        char endpoint[IP_ADDR_STR_LEN + 16];
         char label[384];
         char last[32];
         char down[20];
@@ -219,28 +296,27 @@ static void conversation_panel(struct panel p, const struct tui_snapshot *snapsh
 
         ip_addr_str(&row->key.remote_ip, address);
 
-        if (live) {
-            snprintf(label, sizeof label, "%s%s%s", row->name,
-                     row->name[0] ? " -> " : "", address);
-        } else {
-            snprintf(label, sizeof label, "%s%s%s%s%s:%u/%s", row->name,
-                     row->name[0] ? " -> " : "", row->key.remote_ip.family == 6 ? "[" : "",
-                     address, row->key.remote_ip.family == 6 ? "]" : "",
-                     row->key.remote_port, row->key.protocol == 6 ? "tcp" : "udp");
-        }
-
+        snprintf(endpoint, sizeof endpoint, "%s%s%s:%u/%s", row->key.remote_ip.family == 6 ? "[" : "",
+                 address, row->key.remote_ip.family == 6 ? "]" : "",
+                 row->key.remote_port, row->key.protocol == 6 ? "tcp" : "udp");
+        endpoint_label(row->name, endpoint, endpoint_width, label);
         age(now, row->totals.last_seen, last);
-        bytes((double)row->totals.bytes_in, down);
-        bytes((double)row->totals.bytes_out, up);
+
+        if (live && !row->rates_valid) {
+            snprintf(down, sizeof down, "--");
+            snprintf(up, sizeof up, "--");
+        } else {
+            bytes(live ? row->rate_down : (double)row->totals.bytes_in, down);
+            bytes(live ? row->rate_up : (double)row->totals.bytes_out, up);
+        }
 
         const int attributes = state->focus == focus && selected == index ? A_REVERSE : 0;
 
-        if (live) {
+        if (show_seen) {
             text(p.y + 2 + i, p.x + 1, p.width - 2, attributes,
-                 "%c %-*.*s %-*.*s %3s %5u %6.6s", selected == index ? '>' : ' ',
+                 "%c %-*.*s %-*.*s %10.10s %10.10s %6.6s", selected == index ? '>' : ' ',
                  application_width, application_width, row->key.application[0] ? row->key.application : "unresolved",
-                 endpoint_width, endpoint_width, label, row->key.protocol == 6 ? "TCP" : "UDP",
-                 row->key.remote_port, last);
+                 endpoint_width, endpoint_width, label, down, up, last);
         } else {
             text(p.y + 2 + i, p.x + 1, p.width - 2, attributes,
                  "%c %-*.*s %-*.*s %10.10s %10.10s", selected == index ? '>' : ' ',
@@ -254,7 +330,8 @@ static void conversation_panel(struct panel p, const struct tui_snapshot *snapsh
     }
 
     text(p.y + p.height - 2, p.x + 2, p.width - 4, A_DIM,
-         "%zu shown (limit %d) | Enter: details", count, TUI_MAX_ROWS);
+         live ? "%zu shown (limit %d) | DB rates; -- waiting | Enter: details"
+              : "%zu shown (limit %d) | Enter: details", count, TUI_MAX_ROWS);
 }
 
 static void application_panel(struct panel p, const struct tui_snapshot *snapshot,
@@ -310,14 +387,15 @@ static void endpoint_panel(struct panel p, const struct tui_snapshot *snapshot,
         const size_t index = start + (size_t)i;
         const struct tui_endpoint *row = &snapshot->endpoints[index];
         char address[IP_ADDR_STR_LEN];
+        char label[384];
         char first[40];
 
         ip_addr_str(&row->ip, address);
+        endpoint_label(row->name, address, p.width - 25, label);
         timestamp(row->first_seen, first);
         text(p.y + 1 + i, p.x + 1, p.width - 2,
              state->focus == 3 && selected == index ? A_REVERSE : 0,
-             "%c %.19s  %s%s%s", selected == index ? '>' : ' ', first, row->name,
-             row->name[0] != '\0' ? " -> " : "", address);
+             "%c %.19s  %s", selected == index ? '>' : ' ', first, label);
     }
 
     if (snapshot->endpoint_count == 0) {
@@ -326,6 +404,28 @@ static void endpoint_panel(struct panel p, const struct tui_snapshot *snapshot,
 
     text(p.y + p.height - 2, p.x + 2, p.width - 4, A_DIM,
          "%zu remote IPs shown (limit %d); protocol filter does not apply", snapshot->endpoint_count, TUI_MAX_ROWS);
+}
+
+static int modal_text_width(void) {
+    const int width = (COLS < 104 ? COLS - 4 : 100) - 4;
+
+    return width > 0 ? width : 1;
+}
+
+static size_t name_line_count(const char *name) {
+    const size_t width = (size_t)modal_text_width();
+    const size_t length = strlen(name);
+
+    return length == 0 ? 1 : (length + width - 1) / width;
+}
+
+static void modal_name(char content[24][320], size_t *count, const char *name) {
+    const size_t width = (size_t)modal_text_width();
+    const size_t length = strlen(name);
+
+    for (size_t offset = 0; offset < length && *count < 24; offset += width) {
+        snprintf(content[(*count)++], 320, "%.*s", (int)width, name + offset);
+    }
 }
 
 static void modal(const struct tui_snapshot *snapshot, const struct tui_screen *state) {
@@ -339,7 +439,7 @@ static void modal(const struct tui_snapshot *snapshot, const struct tui_screen *
 
     draw_border(p, state->help ? "Help" : state->focus == 2 ? "Selected application" : "Selected endpoint", 1);
 
-    char content[16][320] = { { 0 } };
+    char content[24][320] = { { 0 } };
     size_t count = 0;
 
     if (state->help) {
@@ -381,7 +481,7 @@ static void modal(const struct tui_snapshot *snapshot, const struct tui_screen *
 
             timestamp(row->first_seen, first);
             timestamp(row->last_seen, last);
-            snprintf(content[count++], 320, "%s", row->name[0] ? row->name : "Unnamed endpoint");
+            modal_name(content, &count, row->name[0] ? row->name : "Unnamed endpoint");
             snprintf(content[count++], 320, "Remote IP:");
             snprintf(content[count++], 320, "%s", ip_addr_str(&row->ip, address));
             snprintf(content[count++], 320, "First seen: %s", first);
@@ -392,7 +492,7 @@ static void modal(const struct tui_snapshot *snapshot, const struct tui_screen *
             snprintf(content[count++], 320, "Application: %s", row->key.application[0] ? row->key.application : "unresolved");
             timestamp(row->totals.first_seen, first);
             timestamp(row->totals.last_seen, last);
-            snprintf(content[count++], 320, "%s", row->name[0] ? row->name : "Unnamed conversation");
+            modal_name(content, &count, row->name[0] ? row->name : "Unnamed conversation");
             snprintf(content[count++], 320, "Remote IP:");
             snprintf(content[count++], 320, "%s", ip_addr_str(&row->key.remote_ip, address));
             snprintf(content[count++], 320, "Local IP:");
@@ -403,6 +503,18 @@ static void modal(const struct tui_snapshot *snapshot, const struct tui_screen *
             snprintf(content[count++], 320, "First seen: %s", first);
             snprintf(content[count++], 320, "Last seen:  %s", last);
             snprintf(content[count++], 320, "Name source: %s", row->name[0] ? "recorded DNS association" : "unknown");
+
+            if (state->focus == 0) {
+                char down[20];
+                char up[20];
+
+                bytes(row->rate_down, down);
+                bytes(row->rate_up, up);
+                snprintf(content[count++], 320, "Download rate: %s%s", row->rates_valid ? down : "waiting for next sample",
+                         row->rates_valid ? "/s (DB estimate)" : "");
+                snprintf(content[count++], 320, "Upload rate:   %s%s", row->rates_valid ? up : "waiting for next sample",
+                         row->rates_valid ? "/s (DB estimate)" : "");
+            }
         }
     } else {
         snprintf(content[count++], 320, "The selected entry is no longer in this view.");
@@ -522,7 +634,16 @@ int tui_screen_key(int key, const struct tui_snapshot *snapshot,
     }
 
     if (state->help || state->details) {
-        const size_t lines = state->help ? 16 : state->focus == 3 ? 5 : state->focus == 2 ? 7 : 12;
+        size_t lines = state->help ? 16 : state->focus == 3 ? 5 : state->focus == 2 ? 7 : state->focus == 0 ? 14 : 12;
+
+        if (!state->help && state->focus != 2 && panel_count(snapshot, state->focus) != 0) {
+            const size_t index = state->selected[state->focus];
+            const char *name = state->focus == 3 ? snapshot->endpoints[index].name
+                             : state->focus == 0 ? snapshot->live[index].name : snapshot->top[index].name;
+
+            lines += name_line_count(name) - 1;
+        }
+
         const int visible = (LINES < 23 ? LINES - 4 : 19) - 3;
         const size_t maximum = visible > 0 && lines > (size_t)visible ? lines - (size_t)visible : 0;
 

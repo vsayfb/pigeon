@@ -54,7 +54,7 @@ static void print_snapshot(const struct tui_snapshot *snapshot) {
     printf("Traffic overview (all recorded payload)\nconversations=%" PRIu64
            " remote_ips=%" PRIu64 " down=%.0f up=%.0f\n",
            snapshot->conversations, snapshot->remote_ips, snapshot->bytes_down, snapshot->bytes_up);
-    puts("Live traffic (last 30 seconds)");
+    puts("Live traffic (last 30 seconds; counters are totals)");
 
     for (size_t i = 0; i < snapshot->live_count; i++) {
         print_row(&snapshot->live[i]);

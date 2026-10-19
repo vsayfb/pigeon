@@ -154,8 +154,26 @@ of all applications. Application details include conversation and remote-IP
 counts and the latest observation time. Wide layouts place Applications and New
 endpoints side by side below the conversation lists.
 
+Live traffic shows estimated download/upload rates per conversation in `Down/s`
+and `Up/s`, ordered by last activity. Values are payload bytes per second in the
+shown unit. The endpoint label includes port/protocol; narrow panels hide the
+Seen column, which remains available in details. Long domain names are
+abbreviated in the middle with `...` to preserve the IP, port, and protocol.
+If space is too limited for a useful name, the label shows only the endpoint;
+if the endpoint itself cannot fit, it also gets an explicit `...` marker.
+New endpoints uses the same rule for domain/IP labels. Details wrap full domain
+names across lines. `--` means that a row is waiting
+for a second sample at least one second later. A measured zero shows `0 B`.
+Only continuously visible rows retain rate baselines: rows that leave and return
+because of filtering, recency, or the 200-row limit start sampling again. Counter
+resets also restart sampling. Rapid refreshes retain the previous estimate;
+pauses or read failures lengthen the interval used by the next successful sample.
+Row details show both cumulative totals and the rate estimates.
+
 Refreshes occur once per second. Overview totals and Top Conversations are
-cumulative database counters. Rates estimate changes in those counters between
+cumulative database counters. A `--once` snapshot also prints conversation
+counters as totals, since a single read cannot estimate rates. Rates estimate
+changes in those counters between
 viewer samples. Separate download and upload traces hold up to 60 viewer samples
 (fewer in narrow terminals), with the newest at the right. Both use the displayed
 shared scale from zero to the visible peak; `_` marks zero traffic. Each trace
