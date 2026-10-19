@@ -343,7 +343,7 @@ struct replay {
 
 /* Packets 0, 2 and 3 of the fixture go client -> server; 1 and 4 reply. */
 static void check_handshake_frame(const uint8_t *data, uint32_t caplen,
-                                  uint32_t wirelen, void *user) {
+                                  uint32_t wirelen, int64_t timestamp, void *user) {
     struct replay *r = user;
     const int from_client = r->count == 0 || r->count == 2 || r->count == 3;
     const size_t expected_payload = r->count >= 3 ? 38 : 0;
@@ -352,6 +352,7 @@ static void check_handshake_frame(const uint8_t *data, uint32_t caplen,
     struct tcp_view tcp;
 
     (void)wirelen;
+    (void)timestamp;
 
     CHECK(eth_parse(data, caplen, &eth) == 0);
     CHECK(ipv4_parse(eth.payload, eth.payload_len, &ip) == 0);
@@ -382,12 +383,13 @@ static void test_handshake_fixture(void) {
  * padding.
  */
 static void check_short_frame(const uint8_t *data, uint32_t caplen,
-                              uint32_t wirelen, void *user) {
+                              uint32_t wirelen, int64_t timestamp, void *user) {
     struct replay *r = user;
     struct eth_view eth;
     struct ipv4_view ip;
 
     (void)wirelen;
+    (void)timestamp;
 
     CHECK(caplen == 60);
     CHECK(eth_parse(data, caplen, &eth) == 0);

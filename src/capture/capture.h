@@ -10,10 +10,11 @@
  *          Valid only until the callback returns; copy what you keep.
  * caplen   Number of bytes actually captured and readable at data.
  * wirelen  Original length of the frame on the wire (>= caplen).
+ * timestamp Capture time in Unix seconds; subsecond precision is discarded.
  * user     Pointer passed to capture_run_live().
  */
 typedef void (*capture_cb)(const uint8_t *data, uint32_t caplen,
-                           uint32_t wirelen, void *user);
+                           uint32_t wirelen, int64_t timestamp, void *user);
 
 /*
  * Captures packets on the interface `ifname` and invokes `cb` for each
@@ -34,5 +35,9 @@ int capture_run_live(const char *ifname, capture_cb cb, void *user);
  * values are the same as for capture_run_live().
  */
 int capture_run_file(const char *path, capture_cb cb, void *user);
+
+/* Requests termination of the current capture loop. Intended for callbacks;
+ * has no effect when no capture is running. */
+void capture_stop(void);
 
 #endif

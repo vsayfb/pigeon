@@ -12,16 +12,18 @@ struct recorded {
 
     uint32_t caplen[MAX_PACKETS];
     uint32_t wirelen[MAX_PACKETS];
+    int64_t timestamp[MAX_PACKETS];
     int is_ipv4[MAX_PACKETS];
 };
 
 static void record(const uint8_t *data, uint32_t caplen, uint32_t wirelen,
-                   void *user) {
+                   int64_t timestamp, void *user) {
     struct recorded *r = user;
 
     if (r->count < MAX_PACKETS) {
         r->caplen[r->count] = caplen;
         r->wirelen[r->count] = wirelen;
+        r->timestamp[r->count] = timestamp;
         r->is_ipv4[r->count] = data[12] == 0x08 && data[13] == 0x00;
     }
 
@@ -41,6 +43,7 @@ static void test_replays_every_packet_in_order(void) {
         CHECK(r.caplen[i] == expected[i]);
         CHECK(r.wirelen[i] == expected[i]);
         CHECK(r.is_ipv4[i]);
+        CHECK(r.timestamp[i] == 1700000000);
     }
 }
 
@@ -76,7 +79,24 @@ static void test_non_ethernet_link_type_fails(void) {
     unlink(path);
 }
 
+static void stop_after_one(const uint8_t *data, uint32_t caplen, uint32_t wirelen,
+                            int64_t timestamp, void *user) {
+    record(data, caplen, wirelen, timestamp, user);
+    capture_stop();
+}
+
+static void test_callback_can_stop_capture(void) {
+    struct recorded r = { 0 };
+
+    CHECK(capture_run_file(PIGEON_FIXTURE_DIR "/tcp_handshake.pcap",
+                          stop_after_one, &r) == 0);
+    CHECK(r.count == 1);
+
+    capture_stop();
+}
+
 int main(void) {
+    test_callback_can_stop_capture();
     test_replays_every_packet_in_order();
     test_missing_file_fails();
     test_non_ethernet_link_type_fails();

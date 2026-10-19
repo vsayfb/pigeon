@@ -1,0 +1,347 @@
+#include "store/store.h"
+#include "store/schema.h"
+
+#include <sqlite3.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+struct store {
+    sqlite3 *db;
+    sqlite3_stmt *upsert;
+    sqlite3_stmt *lookup;
+
+    char error[STORE_ERROR_LEN];
+    int unusable;
+};
+
+static int fail(struct store *store, const char *operation) {
+    snprintf(store->error, sizeof store->error, "%s: %s",
+             operation, sqlite3_errmsg(store->db));
+
+    return -1;
+}
+
+static int execute(struct store *store, const char *sql) {
+    if (sqlite3_exec(store->db, sql, NULL, NULL, NULL) != SQLITE_OK) {
+        return fail(store, "SQL execution");
+    }
+
+    return 0;
+}
+
+static void rollback(struct store *store) {
+    if (sqlite3_exec(store->db, "ROLLBACK", NULL, NULL, NULL) != SQLITE_OK) {
+        store->unusable = 1;
+    }
+}
+
+static int scalar(struct store *store, const char *sql, int *value) {
+    sqlite3_stmt *statement = NULL;
+
+    if (sqlite3_prepare_v2(store->db, sql, -1, &statement, NULL) != SQLITE_OK) {
+        return fail(store, "prepare scalar");
+    }
+
+    int rc = -1;
+
+    if (sqlite3_step(statement) == SQLITE_ROW) {
+        *value = sqlite3_column_int(statement, 0);
+        rc = 0;
+    } else {
+        fail(store, "read scalar");
+    }
+
+    sqlite3_finalize(statement);
+
+    return rc;
+}
+
+static int initialize_schema(struct store *store) {
+    if (execute(store, "BEGIN IMMEDIATE") == -1) {
+        return -1;
+    }
+
+    int version;
+
+    if (scalar(store, "PRAGMA user_version", &version) == -1) {
+        goto error;
+    }
+
+    if (version == 0) {
+        int objects;
+
+        if (scalar(store, "SELECT count(*) FROM sqlite_master "
+                   "WHERE name NOT LIKE 'sqlite_%'", &objects) == -1) {
+            goto error;
+        }
+
+        if (objects != 0) {
+            snprintf(store->error, sizeof store->error,
+                     "unversioned database is not empty");
+            goto error;
+        }
+
+        if (execute(store, STORE_SCHEMA_SQL) == -1) {
+            goto error;
+        }
+    } else if (version != SCHEMA_VERSION) {
+        snprintf(store->error, sizeof store->error,
+                 "unsupported schema version %d (expected %d)", version, SCHEMA_VERSION);
+        goto error;
+    }
+
+    if (execute(store, "COMMIT") == -1) {
+        goto error;
+    }
+
+    return 0;
+
+error:
+    rollback(store);
+
+    return -1;
+}
+
+static int enable_wal(struct store *store, const char *path) {
+    sqlite3_stmt *statement = NULL;
+
+    if (sqlite3_prepare_v2(store->db, "PRAGMA journal_mode=WAL", -1,
+                           &statement, NULL) != SQLITE_OK) {
+        return fail(store, "prepare WAL");
+    }
+
+    int rc = -1;
+
+    if (sqlite3_step(statement) == SQLITE_ROW) {
+        const char *mode = (const char *)sqlite3_column_text(statement, 0);
+        const char *expected = strcmp(path, ":memory:") == 0 ? "memory" : "wal";
+
+        if (mode != NULL && strcmp(mode, expected) == 0) {
+            rc = 0;
+        } else {
+            snprintf(store->error, sizeof store->error, "WAL mode unavailable");
+        }
+    } else {
+        fail(store, "enable WAL");
+    }
+
+    sqlite3_finalize(statement);
+
+    return rc;
+}
+
+struct store *store_open(const char *path, char error[STORE_ERROR_LEN]) {
+    struct store *store = calloc(1, sizeof *store);
+
+    if (store == NULL) {
+        snprintf(error, STORE_ERROR_LEN, "store allocation failed");
+
+        return NULL;
+    }
+
+    if (sqlite3_open_v2(path, &store->db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
+                        NULL) != SQLITE_OK) {
+        fail(store, "open database");
+        goto error;
+    }
+
+    if (sqlite3_busy_timeout(store->db, 1000) != SQLITE_OK) {
+        fail(store, "set busy timeout");
+        goto error;
+    }
+
+    if (initialize_schema(store) == -1 || enable_wal(store, path) == -1 ||
+        execute(store, "PRAGMA synchronous=FULL") == -1) {
+        goto error;
+    }
+
+    if (sqlite3_prepare_v2(store->db, STORE_UPSERT_SQL, -1,
+                           &store->upsert, NULL) != SQLITE_OK ||
+        sqlite3_prepare_v2(store->db, STORE_LOOKUP_SQL, -1,
+                           &store->lookup, NULL) != SQLITE_OK) {
+        fail(store, "prepare conversation statements");
+        goto error;
+    }
+
+    error[0] = '\0';
+
+    return store;
+
+error:
+    snprintf(error, STORE_ERROR_LEN, "%s", store->error);
+    store_close(store);
+
+    return NULL;
+}
+
+void store_close(struct store *store) {
+    if (store == NULL) {
+        return;
+    }
+
+    sqlite3_finalize(store->upsert);
+    sqlite3_finalize(store->lookup);
+    sqlite3_close(store->db);
+    free(store);
+}
+
+static int bind_key(sqlite3_stmt *statement, const struct flow_key *key) {
+    int rc = sqlite3_bind_int64(statement, 1, key->us_ip);
+
+    if (rc == SQLITE_OK) {
+        rc = sqlite3_bind_int64(statement, 2, key->remote_ip);
+    }
+
+    if (rc == SQLITE_OK) {
+        rc = sqlite3_bind_int(statement, 3, key->remote_port);
+    }
+
+    if (rc == SQLITE_OK) {
+        rc = sqlite3_bind_int(statement, 4, key->protocol);
+    }
+
+    return rc;
+}
+
+static int write_row(struct store *store, const struct store_row *row) {
+    const uint64_t counters[] = {
+        row->delta.packets_out, row->delta.packets_in,
+        row->delta.bytes_out, row->delta.bytes_in
+    };
+
+    if (memchr(row->remote_name, '\0', sizeof row->remote_name) == NULL) {
+        snprintf(store->error, sizeof store->error, "remote name is not NUL terminated");
+
+        return -1;
+    }
+
+    int rc = bind_key(store->upsert, &row->key);
+
+    for (int i = 0; i < 4 && rc == SQLITE_OK; i++) {
+        if (counters[i] > INT64_MAX) {
+            snprintf(store->error, sizeof store->error, "counter exceeds signed 64-bit range");
+
+            return -1;
+        }
+
+        rc = sqlite3_bind_int64(store->upsert, i + 5, (sqlite3_int64)counters[i]);
+    }
+
+    if (rc == SQLITE_OK) {
+        rc = sqlite3_bind_int64(store->upsert, 9, row->delta.first_seen);
+    }
+
+    if (rc == SQLITE_OK) {
+        rc = sqlite3_bind_int64(store->upsert, 10, row->delta.last_seen);
+    }
+
+    if (rc == SQLITE_OK) {
+        rc = row->remote_name[0] == '\0' ? sqlite3_bind_null(store->upsert, 11)
+             : sqlite3_bind_text(store->upsert, 11, row->remote_name, -1, SQLITE_TRANSIENT);
+    }
+
+    if (rc != SQLITE_OK || sqlite3_step(store->upsert) != SQLITE_DONE) {
+        return fail(store, "upsert conversation");
+    }
+
+    return 0;
+}
+
+int store_flush(struct store *store, const struct store_row *rows, size_t count) {
+    store->error[0] = '\0';
+
+    if (store->unusable) {
+        snprintf(store->error, sizeof store->error, "database requires reopening after rollback failure");
+
+        return -1;
+    }
+
+    if (count == 0) {
+        return 0;
+    }
+
+    if (rows == NULL) {
+        snprintf(store->error, sizeof store->error, "rows is NULL for a nonempty batch");
+
+        return -1;
+    }
+
+    if (execute(store, "BEGIN IMMEDIATE") == -1) {
+        return -1;
+    }
+
+    for (size_t i = 0; i < count; i++) {
+        const int rc = write_row(store, &rows[i]);
+
+        sqlite3_reset(store->upsert);
+        sqlite3_clear_bindings(store->upsert);
+
+        if (rc == -1) {
+            rollback(store);
+
+            return -1;
+        }
+    }
+
+    if (execute(store, "COMMIT") == -1) {
+        rollback(store);
+
+        return -1;
+    }
+
+    return 0;
+}
+
+int store_lookup(struct store *store, const struct flow_key *key, struct store_row *out) {
+    store->error[0] = '\0';
+
+    if (bind_key(store->lookup, key) != SQLITE_OK) {
+        fail(store, "bind lookup");
+        sqlite3_reset(store->lookup);
+        sqlite3_clear_bindings(store->lookup);
+
+        return -1;
+    }
+
+    const int rc = sqlite3_step(store->lookup);
+    int result = 0;
+
+    if (rc == SQLITE_ROW) {
+        struct store_row row = { .key = *key };
+
+        row.delta.packets_out = (uint64_t)sqlite3_column_int64(store->lookup, 0);
+        row.delta.packets_in = (uint64_t)sqlite3_column_int64(store->lookup, 1);
+        row.delta.bytes_out = (uint64_t)sqlite3_column_int64(store->lookup, 2);
+        row.delta.bytes_in = (uint64_t)sqlite3_column_int64(store->lookup, 3);
+        row.delta.first_seen = sqlite3_column_int64(store->lookup, 4);
+        row.delta.last_seen = sqlite3_column_int64(store->lookup, 5);
+
+        if (sqlite3_column_type(store->lookup, 6) != SQLITE_NULL) {
+            const char *name = (const char *)sqlite3_column_text(store->lookup, 6);
+
+            if (name == NULL) {
+                fail(store, "read remote name");
+                result = -1;
+            } else {
+                snprintf(row.remote_name, sizeof row.remote_name, "%s", name);
+            }
+        }
+
+        if (result != -1) {
+            *out = row;
+            result = 1;
+        }
+    } else if (rc != SQLITE_DONE) {
+        result = fail(store, "lookup conversation");
+    }
+
+    sqlite3_reset(store->lookup);
+    sqlite3_clear_bindings(store->lookup);
+
+    return result;
+}
+
+const char *store_error(const struct store *store) {
+    return store->error;
+}

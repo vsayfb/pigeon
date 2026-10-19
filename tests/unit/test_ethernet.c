@@ -66,12 +66,13 @@ struct replay {
 
 /* Packets 0, 2 and 3 of the fixture go client -> server; 1 and 4 reply. */
 static void check_fixture_frame(const uint8_t *data, uint32_t caplen,
-                                uint32_t wirelen, void *user) {
+                                uint32_t wirelen, int64_t timestamp, void *user) {
     struct replay *r = user;
     const int from_client = r->count == 0 || r->count == 2 || r->count == 3;
     struct eth_view eth;
 
     (void)wirelen;
+    (void)timestamp;
 
     CHECK(eth_parse(data, caplen, &eth) == 0);
     CHECK(eth.ethertype == ETHERTYPE_IPV4);

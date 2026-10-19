@@ -19,6 +19,7 @@ endif()
 include_directories(src)
 
 find_library(PCAP_LIBRARY pcap REQUIRED)
+find_package(SQLite3 3.24 REQUIRED)
 
 add_library(pigeon_core STATIC
         src/capture/capture.c
@@ -29,8 +30,9 @@ add_library(pigeon_core STATIC
         src/proto/pktdump.c
         src/flow/flow_table.c
         src/flow/flow.c
+        src/store/store.c
 )
-target_link_libraries(pigeon_core PUBLIC ${PCAP_LIBRARY})
+target_link_libraries(pigeon_core PUBLIC ${PCAP_LIBRARY} SQLite::SQLite3)
 
 add_executable(pigeon src/main.c)
 target_compile_definitions(pigeon PRIVATE PIGEON_VERSION="0.0.1")
@@ -93,3 +95,7 @@ add_test(NAME flow_table COMMAND test_flow_table)
 add_executable(test_flow tests/unit/test_flow.c)
 target_link_libraries(test_flow PRIVATE pigeon_core)
 add_test(NAME flow COMMAND test_flow)
+
+add_executable(test_store tests/unit/test_store.c)
+target_link_libraries(test_store PRIVATE pigeon_core)
+add_test(NAME store COMMAND test_store)

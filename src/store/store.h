@@ -1,0 +1,60 @@
+#ifndef PIGEON_STORE_H
+#define PIGEON_STORE_H
+
+#include "flow/flow_table.h"
+
+#define STORE_ERROR_LEN 256
+#define STORE_NAME_LEN 254
+
+struct store;
+
+/* A copied conversation snapshot. Empty remote_name represents SQL NULL.
+ * On flush, delta contains increments; on lookup, it contains stored totals. */
+struct store_row {
+    struct flow_key key;
+    struct flow_delta delta;
+    char remote_name[STORE_NAME_LEN];
+};
+
+/*
+ * Opens or creates path, or an isolated in-memory database for ":memory:".
+ * Creates schema version 1 only in an empty, unversioned database; rejects
+ * unsupported versions. File databases use WAL and synchronous=FULL.
+ * The caller owns the store and releases it with store_close(). error must
+ * provide STORE_ERROR_LEN writable bytes. No database handle is borrowed.
+ *
+ * Returns the store on success, clearing error. Returns NULL and writes an
+ * explanation to error on failure. Requires SQLite 3.24.0 or newer.
+ */
+struct store *store_open(const char *path, char error[STORE_ERROR_LEN]);
+
+/* Finalizes statements and closes the database. Accepts NULL. */
+void store_close(struct store *store);
+
+/*
+ * Adds count rows to cumulative totals in one transaction. Rows are borrowed
+ * for the call and remain unchanged. NULL rows is valid only for count zero.
+ * Counters must fit signed 64-bit integers, names must be NUL terminated,
+ * and first_seen must not exceed last_seen. Existing names are preserved;
+ * an unnamed row may acquire a name. Timestamps retain their minimum/maximum.
+ * Replaying an already successful batch adds its counters again.
+ *
+ * Returns 0 on success. Returns -1 with store_error() set on failure; no
+ * partial batch is committed. Pending in-memory deltas are never cleared.
+ */
+int store_flush(struct store *store, const struct store_row *rows, size_t count);
+
+/*
+ * Looks up key, copying cumulative totals and name into out on success.
+ * No returned field borrows database memory.
+ *
+ * Returns 1 if found, 0 if absent, or -1 with store_error() set on failure.
+ * Leaves out untouched when absent or on failure.
+ */
+int store_lookup(struct store *store, const struct flow_key *key, struct store_row *out);
+
+/* Returns a borrowed explanation of the last error, valid until the next
+ * store operation or close. Successful operations clear the explanation. */
+const char *store_error(const struct store *store);
+
+#endif

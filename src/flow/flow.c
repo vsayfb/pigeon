@@ -142,3 +142,11 @@ void flow_set_eviction_handler(struct flow *flow, flow_evict_cb cb, void *user) 
     flow->on_evict = cb;
     flow->evict_user = user;
 }
+
+void flow_visit(const struct flow *flow,
+                void (*visit)(const struct flow_entry *entry, void *user), void *user) {
+    for (const struct flow_entry *entry = flow_table_newest(flow->table);
+         entry != NULL; entry = flow_entry_older(entry)) {
+        visit(entry, user);
+    }
+}

@@ -19,7 +19,7 @@ static void on_pcap_packet(u_char *arg, const struct pcap_pkthdr *hdr,
                            const u_char *bytes) {
     struct trampoline *t = (struct trampoline *)arg;
 
-    t->cb(bytes, hdr->caplen, hdr->len, t->user);
+    t->cb(bytes, hdr->caplen, hdr->len, (int64_t)hdr->ts.tv_sec, t->user);
 }
 
 /* Signal handler for SIGINT/SIGTERM; makes pcap_loop() return. */
@@ -127,4 +127,12 @@ int capture_run_file(const char *path, capture_cb cb, void *user) {
     }
 
     return run_loop(handle, cb, user);
+}
+
+void capture_stop(void) {
+    pcap_t *handle = active_handle;
+
+    if (handle != NULL) {
+        pcap_breakloop(handle);
+    }
 }

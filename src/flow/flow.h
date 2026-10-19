@@ -52,4 +52,9 @@ const struct flow_entry *flow_find(const struct flow *flow, const struct flow_ke
  * not invoke this callback; pending entries must be consumed before teardown. */
 void flow_set_eviction_handler(struct flow *flow, flow_evict_cb cb, void *user);
 
+/* Visits each current entry from newest to oldest. Entries and user are
+ * borrowed for the call. The visitor must not modify or destroy the tracker. */
+void flow_visit(const struct flow *flow,
+                void (*visit)(const struct flow_entry *entry, void *user), void *user);
+
 #endif

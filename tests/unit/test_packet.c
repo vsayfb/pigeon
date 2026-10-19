@@ -106,11 +106,12 @@ struct replay {
 };
 
 static void check_frame(const uint8_t *data, uint32_t caplen,
-                        uint32_t wirelen, void *user) {
+                        uint32_t wirelen, int64_t timestamp, void *user) {
     struct replay *r = user;
     struct packet_view packet;
 
     (void)wirelen;
+    (void)timestamp;
 
     CHECK(packet_parse(data, caplen, &packet) == 0);
     CHECK(packet.ip.src == 0xC000020A || packet.ip.src == 0xC6336414);
