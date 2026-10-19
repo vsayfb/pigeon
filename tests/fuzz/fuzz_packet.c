@@ -27,6 +27,20 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         abort();
     }
 
+    if (packet.eth.vlan_count > ETH_MAX_VLAN_TAGS) {
+        abort();
+    }
+
+    if (packet.kind == PACKET_ESP) {
+        const struct esp_view *esp = &packet.esp;
+
+        if (esp->spi == 0 || esp->payload < data || esp->payload > data + size ||
+            esp->payload_len > size - (size_t)(esp->payload - data) ||
+            esp->payload_len > esp->payload_wire_len) {
+            abort();
+        }
+    }
+
     if (packet.kind == PACKET_TCP || packet.kind == PACKET_UDP) {
         const uint8_t *payload = packet.kind == PACKET_TCP
                                  ? packet.transport.tcp.payload : packet.transport.udp.payload;

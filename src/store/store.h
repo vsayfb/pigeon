@@ -19,7 +19,7 @@ struct store_row {
 
 /*
  * Opens or creates path, or an isolated in-memory database for ":memory:".
- * Creates schema version 6 and migrates versions 1/2/3/4/5; rejects
+ * Creates schema version 7 and migrates versions 1/2/3/4/5/6; rejects
  * unsupported versions. File databases use WAL and synchronous=FULL.
  * The caller owns the store and releases it with store_close(). error must
  * provide STORE_ERROR_LEN writable bytes. No database handle is borrowed.

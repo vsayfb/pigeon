@@ -117,7 +117,7 @@ static int initialize_schema(struct store *store) {
         if (execute(store, STORE_MIGRATE_V2_SQL) == -1) {
             goto error;
         }
-    } else if (version != 3 && version != 4 && version != 5 && version != SCHEMA_VERSION) {
+    } else if (version != 3 && version != 4 && version != 5 && version != 6 && version != SCHEMA_VERSION) {
         snprintf(store->error, sizeof store->error,
                  "unsupported schema version %d (expected %d)", version, SCHEMA_VERSION);
         goto error;
@@ -132,6 +132,10 @@ static int initialize_schema(struct store *store) {
     }
 
     if (version >= 1 && version <= 5 && execute(store, STORE_MIGRATE_V5_SQL) == -1) {
+        goto error;
+    }
+
+    if (version >= 1 && version <= 6 && execute(store, STORE_MIGRATE_V6_SQL) == -1) {
         goto error;
     }
 

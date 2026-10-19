@@ -159,8 +159,9 @@ void flow_destroy(struct flow *flow) {
 
 int flow_observe(struct flow *flow, const struct packet_view *packet, int64_t now) {
     const int icmp = packet->kind == PACKET_ICMP || packet->kind == PACKET_ICMPV6;
+    const int esp = packet->kind == PACKET_ESP;
 
-    if (packet->kind != PACKET_TCP && packet->kind != PACKET_UDP && !icmp) {
+    if (packet->kind != PACKET_TCP && packet->kind != PACKET_UDP && !icmp && !esp) {
         return 0;
     }
 
@@ -202,10 +203,10 @@ int flow_observe(struct flow *flow, const struct packet_view *packet, int64_t no
         .us_ip = outgoing ? source : destination,
         .remote_ip = outgoing ? destination : source,
         .remote_port = outgoing ? destination_port : source_port,
-        .protocol = packet_protocol(packet)
+        .protocol = esp ? IP_PROTO_ESP : packet_protocol(packet)
     };
 
-    if (!icmp && flow->resolve_application != NULL) {
+    if (!icmp && !esp && flow->resolve_application != NULL) {
         flow->resolve_application(&key, outgoing ? source_port : destination_port,
                                   key.application, flow->application_user);
         key.application[FLOW_APP_LEN - 1] = '\0';
@@ -232,10 +233,14 @@ int flow_observe(struct flow *flow, const struct packet_view *packet, int64_t no
 
     struct flow_delta delta = *flow_entry_delta(entry);
 
-    const size_t payload = packet->kind == PACKET_TCP
-                           ? packet->transport.tcp.payload_wire_len
-                           : packet->kind == PACKET_UDP ? packet->transport.udp.payload_wire_len
-                                                       : packet->transport.icmp.payload_wire_len;
+    size_t payload;
+
+    switch (packet->kind) {
+        case PACKET_TCP: payload = packet->transport.tcp.payload_wire_len; break;
+        case PACKET_UDP: payload = packet->transport.udp.payload_wire_len; break;
+        case PACKET_ESP: payload = packet->esp.payload_wire_len; break;
+        default: payload = packet->transport.icmp.payload_wire_len; break;
+    }
 
     if (outgoing) {
         delta.packets_out++;

@@ -10,6 +10,8 @@
 #define ETHERTYPE_IPV4 0x0800
 #define ETHERTYPE_ARP  0x0806
 #define ETHERTYPE_VLAN 0x8100
+#define ETHERTYPE_VLAN_SERVICE 0x88A8
+#define ETH_MAX_VLAN_TAGS 4
 #define ETHERTYPE_IPV6 0x86DD
 
 
@@ -24,10 +26,17 @@ Ethernet II frame (14-byte header)
 ↓            ↓            ↓          ↓
 frame        frame+6      frame+12   frame+14
 */
+struct vlan_tag {
+    uint16_t tpid;
+    uint16_t tci; /* priority, drop eligibility and 12-bit VLAN ID */
+};
+
 struct eth_view {
     uint8_t dst[ETH_ADDR_LEN];
     uint8_t src[ETH_ADDR_LEN];
-    uint16_t ethertype;         /* host byte order */
+    uint16_t ethertype;         /* inner EtherType after decoded VLAN tags */
+    struct vlan_tag vlans[ETH_MAX_VLAN_TAGS];
+    uint8_t vlan_count;
     const uint8_t *payload;     /* points into the frame passed to eth_parse() */
     size_t payload_len;
 };
@@ -37,7 +46,10 @@ struct eth_view {
  * bytes) into `out`. `out->payload` points into `frame`, so it is only
  * valid as long as `frame` is.
  *
- * Returns 0 on success, -1 if `len` is shorter than ETH_HEADER_LEN.
+ * Decodes up to ETH_MAX_VLAN_TAGS standard 802.1Q (0x8100) or
+ * 802.1ad (0x88a8) tags; payload starts after the final tag.
+ * Returns 0 on success. Returns -1 with out unchanged for a short header,
+ * truncated tag or excessive tag nesting.
  */
 int eth_parse(const uint8_t *frame, size_t len, struct eth_view *out);
 

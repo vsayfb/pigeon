@@ -556,6 +556,38 @@ static void test_quic_and_legacy_versions(void) {
     }
 }
 
+static void test_esp_filter(void) {
+    char path[] = "/tmp/pigeon-tui-esp-XXXXXX";
+    const int fd = mkstemp(path);
+    char error[TUI_ERROR_LEN];
+
+    CHECK(fd != -1 && close(fd) == 0);
+
+    struct store *store = store_open(path, error);
+    struct store_row rows[] = {
+        make_row("192.0.2.10", "198.51.100.42", 50, 16, 16, 100, 110, ""),
+        make_row("2001:db8::10", "2001:db8::42", 50, 16, 16, 100, 110, "")
+    };
+
+    rows[0].key.remote_port = rows[1].key.remote_port = 0;
+    CHECK(store != NULL && store_flush(store, rows, 2) == 0);
+
+    struct tui_reader *reader = tui_reader_open(path, error);
+    struct tui_snapshot *snapshot = calloc(1, sizeof *snapshot);
+    struct tui_options options = { .protocol = 50, .recent_seconds = 30 };
+
+    CHECK(reader != NULL && snapshot != NULL);
+    CHECK(tui_reader_refresh(reader, &options, 110, 0, snapshot, error) == 0);
+    CHECK(snapshot->live_count == 2 && snapshot->top_count == 2);
+    CHECK(snapshot->live[0].key.protocol == 50 && snapshot->live[0].key.remote_port == 0);
+    CHECK(snapshot->live[0].quic == 0);
+
+    free(snapshot);
+    tui_reader_close(reader);
+    store_close(store);
+    CHECK(unlink(path) == 0);
+}
+
 int main(void) {
     test_snapshot_queries_and_refresh();
     test_reader_never_creates_or_migrates();
@@ -564,6 +596,7 @@ int main(void) {
     test_live_rates();
     test_icmp_filters();
     test_quic_and_legacy_versions();
+    test_esp_filter();
 
     puts("tui_model: ok");
 

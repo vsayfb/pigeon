@@ -14,7 +14,7 @@ enum tui_live_sort { TUI_LIVE_RECENCY, TUI_LIVE_TOTAL, TUI_LIVE_DOWNLOAD, TUI_LI
 
 struct tui_options {
     char search[TUI_SEARCH_LEN];
-    int protocol;              /* 0, 1, 6, 17 or 58 */
+    int protocol;              /* 0, 1, 6, 17, 50 or 58 */
     int family;                /* 0, 4 or 6 */
     int recent_seconds;        /* zero means all recorded */
     enum tui_sort sort;

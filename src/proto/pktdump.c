@@ -9,7 +9,14 @@ void pktdump(FILE *stream, const struct packet_view *packet) {
     print_mac(stream, packet->eth.src);
     fprintf(stream, " > ");
     print_mac(stream, packet->eth.dst);
-    fprintf(stream, " type=0x%04x\n", packet->eth.ethertype);
+    fprintf(stream, " type=0x%04x", packet->eth.ethertype);
+
+    for (unsigned i = 0; i < packet->eth.vlan_count; i++) {
+        fprintf(stream, " vlan=%u(tpid=0x%04x)", packet->eth.vlans[i].tci & 0x0fff,
+                packet->eth.vlans[i].tpid);
+    }
+
+    fputc('\n', stream);
 
     if (packet->kind == PACKET_ETHERNET) {
         return;
@@ -47,6 +54,14 @@ void pktdump(FILE *stream, const struct packet_view *packet) {
 
         fprintf(stream, "    UDP %u > %u payload=%zu\n",
                 udp->src_port, udp->dst_port, udp->payload_wire_len);
+    } else if (packet->kind == PACKET_ESP) {
+        if (packet->esp.udp_encapsulated) {
+            fprintf(stream, "    UDP %u > %u (ESP encapsulation)\n",
+                    packet->transport.udp.src_port, packet->transport.udp.dst_port);
+        }
+
+        fprintf(stream, "    ESP spi=0x%08x sequence=%u protected=%zu\n",
+                packet->esp.spi, packet->esp.sequence, packet->esp.payload_wire_len);
     } else if (packet->kind == PACKET_ICMP || packet->kind == PACKET_ICMPV6) {
         const struct icmp_view *icmp = &packet->transport.icmp;
 

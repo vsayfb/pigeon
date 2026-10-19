@@ -4,6 +4,7 @@
 #include "proto/ethernet.h"
 #include "proto/transport.h"
 #include "proto/icmp.h"
+#include "proto/esp.h"
 
 enum packet_kind {
     PACKET_ETHERNET,
@@ -12,7 +13,8 @@ enum packet_kind {
     PACKET_TCP,
     PACKET_UDP,
     PACKET_ICMP,
-    PACKET_ICMPV6
+    PACKET_ICMPV6,
+    PACKET_ESP
 };
 
 /* kind identifies the deepest decoded header; only that layer and its
@@ -22,6 +24,7 @@ struct packet_view {
     struct eth_view eth;
     struct ipv4_view ip;
     struct ipv6_view ip6;
+    struct esp_view esp; /* also valid after UDP when kind is PACKET_ESP */
     union {
         struct tcp_view tcp;
         struct udp_view udp;
@@ -41,7 +44,9 @@ struct packet_view {
 int packet_parse(const uint8_t *frame, size_t len, struct packet_view *out);
 
 /* Returns the source/destination address and final IP protocol of a decoded
- * IP packet. IPv4 fields remain in ip; IPv6 fields remain in ip6. */
+ * IP packet. IPv4 fields remain in ip; IPv6 fields remain in ip6.
+ * UDP-encapsulated ESP retains outer protocol 17 here; flow tracking records
+ * its observed ESP peer under protocol 50 based on PACKET_ESP. */
 struct ip_addr packet_source(const struct packet_view *packet);
 struct ip_addr packet_destination(const struct packet_view *packet);
 uint8_t packet_protocol(const struct packet_view *packet);

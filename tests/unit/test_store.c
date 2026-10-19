@@ -251,7 +251,7 @@ static void test_file_reopen_wal_and_schema_versions(void) {
     sqlite3_stmt *statement = NULL;
 
     CHECK(sqlite3_open(path, &db) == SQLITE_OK);
-    CHECK(read_scalar(db, "PRAGMA user_version") == 6);
+    CHECK(read_scalar(db, "PRAGMA user_version") == 7);
     CHECK(sqlite3_prepare_v2(db, "PRAGMA journal_mode", -1, &statement, NULL) == SQLITE_OK);
     CHECK(sqlite3_step(statement) == SQLITE_ROW);
     CHECK(strcmp((const char *)sqlite3_column_text(statement, 0), "wal") == 0);
@@ -335,7 +335,7 @@ static void test_version_two_migration(void) {
     };
 
     CHECK(store != NULL);
-    CHECK(read_scalar(db, "PRAGMA user_version") == 6);
+    CHECK(read_scalar(db, "PRAGMA user_version") == 7);
     CHECK(store_lookup(store, &key, &row) == 1);
     CHECK(row.delta.bytes_out == 100);
     CHECK(row.delta.packets_in == 2);
@@ -407,7 +407,7 @@ static void test_version_three_application_migration(void) {
     struct store_row row;
 
     CHECK(store != NULL);
-    CHECK(read_scalar(db, "PRAGMA user_version") == 6);
+    CHECK(read_scalar(db, "PRAGMA user_version") == 7);
     CHECK(read_scalar(db, "SELECT count(*) FROM conversations WHERE application=''") == 2);
     CHECK(ip_addr_parse("2001:db8::10", &key.us_ip) == 0);
     CHECK(ip_addr_parse("2001:db8::42", &key.remote_ip) == 0);
@@ -470,7 +470,7 @@ static void test_version_four_icmp_migration(void) {
     struct store_row found;
 
     CHECK(store != NULL);
-    CHECK(read_scalar(db, "PRAGMA user_version") == 6);
+    CHECK(read_scalar(db, "PRAGMA user_version") == 7);
     strcpy(row.key.application, "firefox");
     CHECK(store_lookup(store, &row.key, &found) == 1);
     CHECK(found.delta.bytes_out == 100 && found.delta.bytes_in == 200);
@@ -514,7 +514,7 @@ static void test_version_five_quic_migration(void) {
     struct store_row found;
 
     CHECK(store != NULL);
-    CHECK(read_scalar(db, "PRAGMA user_version") == 6);
+    CHECK(read_scalar(db, "PRAGMA user_version") == 7);
     CHECK(read_scalar(db, "SELECT count(*) FROM conversations WHERE quic=0") == 1);
     row.key.protocol = 17;
     CHECK(store_lookup(store, &row.key, &found) == 1);
@@ -536,6 +536,56 @@ static void test_version_five_quic_migration(void) {
     CHECK(unlink(path) == 0);
 }
 
+static void test_version_six_esp_migration(void) {
+    char path[] = "/tmp/pigeon-store-esp-XXXXXX";
+    const int fd = mkstemp(path);
+    sqlite3 *db = NULL;
+    char error[STORE_ERROR_LEN];
+
+    CHECK(fd != -1 && close(fd) == 0);
+    CHECK(sqlite3_open(path, &db) == SQLITE_OK);
+    CHECK(sqlite3_exec(db, STORE_CONVERSATIONS_V6_SQL STORE_DNS_SCHEMA_SQL
+                      "PRAGMA user_version=6;"
+                      "INSERT INTO conversations VALUES(X'C000020A',X'C6336414',443,17,"
+                      "3,2,100,200,100,110,'old.test','',1);"
+                      "INSERT INTO conversations VALUES(X'C000020A',X'C6336414',0,1,"
+                      "1,1,4,4,100,110,NULL,'',0);"
+                      "INSERT INTO dns_cache VALUES(X'C6336414','old.test',100,200);"
+                      "CREATE TABLE conversations_v6(conflict INTEGER);", NULL, NULL, NULL) == SQLITE_OK);
+    CHECK(store_open(path, error) == NULL);
+    CHECK(read_scalar(db, "PRAGMA user_version") == 6);
+    CHECK(read_scalar(db, "SELECT count(*) FROM conversations") == 2);
+    CHECK(read_scalar(db, "SELECT quic FROM conversations WHERE protocol=17") == 1);
+    CHECK(sqlite3_exec(db, "DROP TABLE conversations_v6", NULL, NULL, NULL) == SQLITE_OK);
+
+    struct store *store = store_open(path, error);
+    struct store_row row = make_row(443);
+    struct store_row found;
+
+    CHECK(store != NULL && read_scalar(db, "PRAGMA user_version") == 7);
+    row.key.protocol = 17;
+    CHECK(store_lookup(store, &row.key, &found) == 1);
+    CHECK(found.quic == 1 && found.delta.bytes_out == 100 && found.delta.bytes_in == 200);
+    CHECK(read_scalar(db, "SELECT count(*) FROM dns_cache") == 1);
+    row.key.protocol = 50;
+    row.key.remote_port = 0;
+    CHECK(store_flush(store, &row, 1) == 0);
+    CHECK(store_lookup(store, &row.key, &found) == 1);
+    CHECK(found.key.protocol == 50 && found.key.remote_port == 0);
+    row.key.remote_port = 4500;
+    CHECK(store_flush(store, &row, 1) == -1);
+    row.key.remote_port = 0;
+    strcpy(row.key.application, "guessed-owner");
+    CHECK(store_flush(store, &row, 1) == -1);
+    row.key.application[0] = '\0';
+    row.quic = 1;
+    CHECK(store_flush(store, &row, 1) == -1);
+
+    store_close(store);
+    CHECK(sqlite3_close(db) == SQLITE_OK);
+    CHECK(unlink(path) == 0);
+}
+
 int main(void) {
     test_totals_and_timestamps();
     test_names_and_independent_keys();
@@ -548,6 +598,7 @@ int main(void) {
     test_version_three_application_migration();
     test_version_four_icmp_migration();
     test_version_five_quic_migration();
+    test_version_six_esp_migration();
 
     puts("store: ok");
 

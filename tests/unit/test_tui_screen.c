@@ -257,11 +257,17 @@ int main(void) {
     tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
     CHECK(columns_contain(0, 90, "/icmpv6"));
     CHECK(!columns_contain(0, 90, ":0/"));
+    snapshot->live[0].key.protocol = 50;
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK(columns_contain(0, 90, "/esp"));
+    CHECK(!columns_contain(0, 90, ":0/"));
     options.protocol = 17;
     CHECK(tui_screen_key('f', snapshot, &options, &state) == TUI_KEY_REFRESH);
     CHECK(options.protocol == 1);
     tui_screen_key('f', snapshot, &options, &state);
     CHECK(options.protocol == 58);
+    tui_screen_key('f', snapshot, &options, &state);
+    CHECK(options.protocol == 50);
     tui_screen_key('f', snapshot, &options, &state);
     CHECK(options.protocol == 0);
     snapshot->live[0].key.protocol = 6;

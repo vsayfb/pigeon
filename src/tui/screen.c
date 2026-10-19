@@ -504,7 +504,7 @@ static void modal(const struct tui_snapshot *snapshot, const struct tui_screen *
             "Tab / Shift-Tab  Change focused panel", "Up/Down, j/k     Select row; PgUp/PgDn, Home/End also work",
             "Enter           Details; on Applications: filter conversations", "/               Search name, remote IP, or application (conversations)",
             "s: cumulative sort | l: live recency/total/down/up", "r               Live window: 10s / 30s / 120s / all",
-            "f               Protocol: any / TCP / UDP / ICMP / ICMPv6", "v               Address family: any / IPv4 / IPv6",
+            "f               Protocol: any / TCP / UDP / ICMP / ICMPv6 / ESP", "v               Address family: any / IPv4 / IPv6",
             "p               Pause auto-refresh; collector keeps running", "q / Ctrl-C      Quit viewer; collector keeps running",
             "Rates are database counter deltas, not NIC speed.", "IO: down=incoming, up=outgoing; observed packet directions.",
             "Graphs: old -> new, shared scale; _ is zero, @ is peak.", "No collector heartbeat is stored. Idle is not stopped.",
@@ -819,7 +819,8 @@ int tui_screen_key(int key, const struct tui_snapshot *snapshot,
 
         case 'f':
             options->protocol = options->protocol == 0 ? 6 : options->protocol == 6 ? 17 :
-                                options->protocol == 17 ? 1 : options->protocol == 1 ? 58 : 0;
+                                options->protocol == 17 ? 1 : options->protocol == 1 ? 58 :
+                                options->protocol == 58 ? 50 : 0;
 
             return TUI_KEY_REFRESH;
 

@@ -32,7 +32,7 @@ Other platforms report ENOSYS for discovery.
 Omit `--verbose` to disable packet output; startup,
 errors and the final packet count still go to stderr.
 
-Ethernet, IPv4, IPv6, TCP, UDP, ICMP and ICMPv6 parsing is separate from printing. Unsupported
+Ethernet, IPv4, IPv6, TCP, UDP, ICMP, ICMPv6 and ESP parsing is separate from printing. Unsupported
 protocols and later IP fragments retain only their decoded enclosing headers.
 Malformed or truncated supported headers are reported in verbose mode.
 
@@ -119,7 +119,7 @@ sudo ./build/pigeon --db /tmp/pigeon.db
 ```
 
 The viewer needs read access to the database and its SQLite sidecar files. It
-opens an existing schema-version-4, -5 or -6 database read-only, never creates or migrates
+opens an existing schema-version-4, -5, -6 or -7 database read-only, never creates or migrates
 it, and does not require capture privileges. Quitting the viewer leaves capture
 running. `--once` prints a snapshot without requiring an interactive terminal.
 
@@ -223,7 +223,7 @@ and SQLite. Saved mappings reload at startup and expire according to the minimum
 CNAME/A TTL. Flows look up names on observation and at flush; a late reply can
 name an already flushed conversation without adding its counters again.
 Verbose conversation summaries include `name=...` (`name=-` when unknown).
-Existing schema-version-1/2/3/4/5 databases migrate transactionally to version 6.
+Existing schema-version-1/2/3/4/5/6 databases migrate transactionally to version 7.
 
 The cache keeps the last observed name for a shared IP; stored conversations
 retain their first assigned name. Plaintext UDP/53 A and AAAA responses are learned over IPv4 or IPv6;
@@ -255,7 +255,7 @@ IPv6 TCP/UDP conversations use the same aggregation, LRU, expiry and persistence
 pipeline as IPv4. Address family is part of identity: IPv4-mapped IPv6 addresses
 are not collapsed into IPv4. Numeric IPv6 endpoints use brackets before ports.
 Common hop-by-hop, routing, destination, fragment and AH extension headers are
-decoded with a 16-header limit. Later fragments are not reassembled; ESP and
+decoded with a 16-header limit. Later fragments are not reassembled;
 unknown protocols are displayed at the IP layer but do not create conversations.
 IPv6 jumbograms and link-local zone identifiers in storage are not supported.
 
@@ -280,7 +280,7 @@ packet. They are not attributed to TCP/UDP applications.
 ICMP has no ports. Rows use `remote_port=0` as a storage sentinel and an empty
 application, grouping all message types for a local/remote pair and protocol.
 The TUI/GUI display the protocol and omit the port. The `f` protocol filter in
-the TUI cycles through any, TCP, UDP, ICMP and ICMPv6.
+the TUI cycles through any, TCP, UDP, ICMP, ICMPv6 and ESP.
 
 ICMPv6 neighbor/router discovery (types 133–137), multicast listener control
 (types 130–132 and 143), and IPv4 router discovery (types 9/10) remain excluded
@@ -294,9 +294,9 @@ bytes for IPv4 and IPv6 echo/errors, four for other ICMPv6 message types. Error
 payloads include the quoted packet; these totals represent control traffic,
 not application data. Type/code appear in verbose dumps, not in persisted keys.
 
-The collector migrates older schemas to v6 transactionally on its next start,
+The collector migrates older schemas to v7 transactionally on its next start,
 preserving existing observations and DNS data. Both updated viewers accept v4,
-v5 and v6; older GUI binaries need rebuilding before reading the new schema.
+v5, v6 and v7; older GUI binaries need rebuilding before reading the new schema.
 
 Replay both families without capture privileges:
 
@@ -342,3 +342,51 @@ Implementation references: [QUIC v1](https://www.rfc-editor.org/rfc/rfc9000.html
 The fixture deliberately contains synthetic header evidence with opaque test
 bodies, not a cryptographically valid QUIC exchange. Regenerate it with
 `python3 tests/fixtures/make_quic.py`.
+
+## VLAN and ESP peers
+
+The Ethernet decoder unwraps up to four standard 802.1Q (0x8100) and 802.1ad
+(0x88a8) tags, including stacked/Q-in-Q frames. It retains the TPID and TCI for
+verbose output and passes the inner EtherType/payload to the existing IP
+parsers. Truncated tags and excessive nesting are rejected safely. VLAN headers
+and Ethernet padding do not contribute to protocol payload counters. Tags are
+not persisted or added to the conversation key; identical endpoints observed
+across tags aggregate together. Only tags present in the capture can be shown.
+
+Native ESP (IP protocol 50) is tracked over IPv4 and IPv6 using the visible
+outer peer addresses. The decoder reads the SPI and sequence number but never
+decrypts or authenticates the packet. SPIs are shown in verbose output, not
+persisted as identities: opposing security associations and rekeys combine
+into one peer observation. Rows have protocol=50, remote_port=0 and an empty
+application; neither inner destinations nor application ownership are guessed.
+
+Standard ESP-in-UDP NAT traversal is also recognized on UDP port 4500 using the
+RFC 3948 nonzero-SPI demultiplexing rule and a complete visible ESP header.
+This assumes standard IPsec use of that reserved port; it is not cryptographic
+validation. IKE packets with the four-zero-byte Non-ESP marker and one-byte
+0xff NAT keepalives remain UDP. An incomplete/invalid ESP envelope on UDP is
+left as UDP. Recognized encapsulated ESP joins the same protocol-50 peer
+aggregate as native ESP and is counted once, not also as UDP. The underlying
+outer IP protocol and UDP ports remain available in verbose packet output.
+
+ESP byte counters measure the opaque body after the eight-byte SPI/sequence
+header, excluding outer Ethernet, VLAN, IP and any UDP header. They include
+cipher/IV, padding/trailer and authentication overhead where present; these
+are not decrypted application bytes. A complete captured header can count
+body bytes declared on the wire even if the body capture is truncated. ESP
+entries expire after 30 idle seconds, with observations retained in SQLite.
+Later fragments still require reassembly and are not tracked individually.
+
+Schema v7 widens the accepted protocol set for ESP. Existing counters, names,
+DNS data and QUIC classification survive its transactional migration. Both
+updated viewers accept schemas v4–v7 and offer an ESP filter with no port.
+Restart the collector and viewers after deploying this change.
+
+```sh
+./build/pigeon --verbose --local-ip 192.0.2.10 --local-ip 2001:db8::10 \
+  -r tests/fixtures/vlan_esp_conversations.pcap
+```
+
+Regenerate the synthetic fixture with `python3 tests/fixtures/make_vlan_esp.py`.
+Protocol references: [ESP](https://www.rfc-editor.org/rfc/rfc4303.html#section-2)
+and [ESP-in-UDP](https://www.rfc-editor.org/rfc/rfc3948.html#section-2).

@@ -1,15 +1,16 @@
 # SQLite schema
 
-Schema version: **6**, stored in `PRAGMA user_version`.
+Schema version: **7**, stored in `PRAGMA user_version`.
 
 The storage module creates the schema only when version is zero and the
-existing database has no application objects. Versions 1, 2, 3, 4 and 5 migrate
+existing database has no application objects. Versions 1, 2, 3, 4, 5 and 6 migrate
 transactionally: version 1 first gains the DNS table, then integer IPv4 keys
 are converted to 4-byte network-order blobs. Version 3 also accepts 16-byte
 IPv6 keys. Version 4 adds application to the conversation key; existing rows
 receive an empty application because historical ownership is unavailable.
 Version 5 adds ICMP (1) and ICMPv6 (58), retaining the same key and columns.
 Version 6 adds a `quic` metadata flag with a default of zero.
+Version 7 permits ESP (50) while retaining the same columns and key.
 Totals, names, DNS mappings and timestamps are preserved. Other versions are
 rejected. A failed migration restores the schema, rows and user version.
 Opening a versioned database also prepares the
@@ -34,8 +35,8 @@ individual TCP connection. The table uses `WITHOUT ROWID` and this composite pri
 |---|---|---|
 | `us_ip` | BLOB | Local IP: 4 bytes for IPv4, 16 for IPv6 |
 | `remote_ip` | BLOB | Remote IP, same byte length/family as local IP |
-| `remote_port` | INTEGER | Remote endpoint's port, 0–65535; ICMP uses a zero sentinel |
-| `protocol` | INTEGER | ICMP = 1, TCP = 6, UDP = 17, ICMPv6 = 58 |
+| `remote_port` | INTEGER | Remote endpoint's port, 0–65535; ICMP and ESP use a zero sentinel |
+| `protocol` | INTEGER | ICMP = 1, TCP = 6, UDP = 17, ESP = 50, ICMPv6 = 58 |
 | `quic` | INTEGER NOT NULL | 0/1: QUIC observed within a UDP aggregate; not part of identity |
 | `application` | TEXT NOT NULL | Executable basename, at most 255 bytes; empty when unresolved |
 | `packets_out` | INTEGER | Cumulative outgoing packet count |
@@ -83,7 +84,7 @@ A successful flush does not clear its input deltas. The caller must clear them
 only after success; submitting the same successful batch again adds it again.
 Flow tracking now flushes pending deltas periodically, before capacity eviction,
 and on shutdown. Periodic flushes are throttled to one attempt per second;
-explicit and capacity flushes bypass this throttle. UDP and ICMP entries expire after
+explicit and capacity flushes bypass this throttle. UDP, ICMP and ESP entries expire after
 30 idle seconds and TCP entries after 120, following a successful flush.
 Deltas are cleared only after commit. Failed writes preserve pending deltas
 and prevent expiry or eviction; the executable stops capture and returns an
@@ -160,4 +161,22 @@ The flag is passive header-based classification, not authentication or proof
 that every UDP packet in the aggregate is QUIC. It does not distinguish HTTP/3.
 The collector requires matching bidirectional CID evidence; a failed or missing
 handshake observation leaves the flag unset. Read-only viewers use zero for
-schemas v4/v5 and read the stored flag in v6.
+schemas v4/v5 and read the stored flag in v6/v7.
+
+## ESP observations and VLAN handling (v7)
+
+Protocol 50 rows accept either IP family but require remote_port=0,
+application='' and quic=0. They aggregate by visible outer local/remote peer,
+not by SPI. Native ESP and standard UDP/4500-encapsulated ESP share this identity;
+recognized encapsulated packets do not also create UDP counter increments.
+IKE (zero Non-ESP marker) and NAT keepalives remain separate UDP traffic.
+
+ESP counters measure bytes after the visible eight-byte ESP header, including
+opaque protection overhead. No cipher, inner address/port, plaintext length,
+process attribution, authentication result or SPI is persisted. Schema-v6
+migration rebuilds the conversation table transactionally to widen its CHECK
+constraints, preserving all existing columns, counters and QUIC flags. DNS
+storage is unchanged. Readers retain compatibility with earlier supported files.
+
+VLAN tags affect decoding only. Up to four 0x8100/0x88a8 headers can be unwrapped;
+tags are shown in verbose output and do not enter stored identities or counters.

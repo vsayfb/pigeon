@@ -30,6 +30,7 @@ add_library(pigeon_core STATIC
         src/proto/address.c
         src/proto/transport.c
         src/proto/icmp.c
+        src/proto/esp.c
         src/proto/quic.c
         src/proto/packet.c
         src/proto/pktdump.c
@@ -216,3 +217,18 @@ add_test(NAME quic_replay COMMAND ${CMAKE_COMMAND}
         -DFIXTURE=${CMAKE_SOURCE_DIR}/tests/fixtures/quic_conversations.pcap
         -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
         -P ${CMAKE_SOURCE_DIR}/tests/integration/test_quic.cmake)
+
+add_executable(test_vlan tests/unit/test_vlan.c)
+target_compile_definitions(test_vlan PRIVATE PIGEON_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
+target_link_libraries(test_vlan PRIVATE pigeon_core)
+add_test(NAME vlan COMMAND test_vlan)
+
+add_executable(test_esp tests/unit/test_esp.c)
+target_link_libraries(test_esp PRIVATE pigeon_core)
+add_test(NAME esp COMMAND test_esp)
+
+add_test(NAME vlan_esp_replay COMMAND ${CMAKE_COMMAND}
+        -DPIGEON=$<TARGET_FILE:pigeon>
+        -DFIXTURE=${CMAKE_SOURCE_DIR}/tests/fixtures/vlan_esp_conversations.pcap
+        -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
+        -P ${CMAKE_SOURCE_DIR}/tests/integration/test_vlan_esp.cmake)

@@ -55,6 +55,28 @@ int packet_parse(const uint8_t *frame, const size_t len, struct packet_view *out
         }
 
         packet.kind = PACKET_UDP;
+
+        const struct udp_view *udp = &packet.transport.udp;
+
+        /* RFC 3948: a nonzero SPI distinguishes ESP from the four-zero-byte
+         * Non-ESP marker used by IKE. A 0xff keepalive has no ESP header.
+         * Insufficient ESP evidence leaves an otherwise valid UDP packet UDP. */
+        if ((udp->src_port == ESP_NATT_PORT || udp->dst_port == ESP_NATT_PORT) &&
+            esp_parse(udp->payload, udp->payload_len, udp->payload_wire_len, &packet.esp) == 0) {
+            packet.esp.udp_encapsulated = 1;
+            packet.kind = PACKET_ESP;
+        }
+    } else if (protocol == IP_PROTO_ESP) {
+        const uint8_t *payload = ipv6 ? packet.ip6.payload : packet.ip.payload;
+        const size_t captured = ipv6 ? packet.ip6.payload_len : packet.ip.payload_len;
+        const size_t wire = ipv6 ? packet.ip6.payload_wire_len
+                                 : (size_t)packet.ip.total_len - packet.ip.header_len;
+
+        if (esp_parse(payload, captured, wire, &packet.esp) == -1) {
+            return -1;
+        }
+
+        packet.kind = PACKET_ESP;
     } else if ((!ipv6 && protocol == IP_PROTO_ICMP) || (ipv6 && protocol == IP_PROTO_ICMPV6)) {
         const uint8_t *payload = ipv6 ? packet.ip6.payload : packet.ip.payload;
         const size_t captured = ipv6 ? packet.ip6.payload_len : packet.ip.payload_len;
