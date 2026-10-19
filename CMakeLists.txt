@@ -158,6 +158,13 @@ add_executable(fuzz_packet tests/fuzz/fuzz_packet.c)
 target_link_libraries(fuzz_packet PRIVATE pigeon_core)
 
 set(CURSES_NEED_NCURSES TRUE)
+set(CURSES_NEED_WIDE TRUE)
+
+# Reconfigure existing build trees that previously selected narrow ncurses.
+if(CURSES_NCURSES_LIBRARY AND NOT CURSES_NCURSES_LIBRARY MATCHES "ncursesw")
+    unset(CURSES_NCURSES_LIBRARY CACHE)
+endif()
+
 find_package(Curses REQUIRED)
 
 add_library(pigeon_tui_data STATIC src/tui/model.c src/proto/address.c)
@@ -165,6 +172,7 @@ target_link_libraries(pigeon_tui_data PUBLIC SQLite::SQLite3)
 
 add_executable(pigeon-tui src/tui/main.c src/tui/screen.c)
 target_include_directories(pigeon-tui PRIVATE ${CURSES_INCLUDE_DIRS})
+target_compile_definitions(pigeon-tui PRIVATE _XOPEN_SOURCE=700 _XOPEN_SOURCE_EXTENDED=1)
 target_link_libraries(pigeon-tui PRIVATE pigeon_tui_data ${CURSES_LIBRARIES})
 
 add_executable(test_tui_model tests/unit/test_tui_model.c)
@@ -173,6 +181,7 @@ add_test(NAME tui_model COMMAND test_tui_model)
 
 add_executable(test_tui_screen tests/unit/test_tui_screen.c src/tui/screen.c)
 target_include_directories(test_tui_screen PRIVATE ${CURSES_INCLUDE_DIRS})
+target_compile_definitions(test_tui_screen PRIVATE _XOPEN_SOURCE=700 _XOPEN_SOURCE_EXTENDED=1)
 target_link_libraries(test_tui_screen PRIVATE pigeon_tui_data ${CURSES_LIBRARIES})
 add_test(NAME tui_screen COMMAND test_tui_screen)
 

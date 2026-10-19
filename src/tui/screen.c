@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <wchar.h>
 
 struct panel {
     int y;
@@ -42,6 +43,34 @@ static void text(int y, int x, int width, int attributes, const char *format, ..
     attron(attributes);
     mvaddnstr(y, x, buffer, width);
     attroff(attributes);
+}
+
+/* Trusted glyphs use the wide-character API. Database strings still pass
+ * through text()'s ASCII sanitization, so they cannot inject terminal controls. */
+static void direction_icon(int y, int x, int incoming) {
+    if (y < 0 || y >= LINES || x < 0 || x >= COLS) {
+        return;
+    }
+
+    const wchar_t glyph = incoming ? L'\u2193' : L'\u2191';
+    const short pair = has_colors() ? (incoming ? 1 : 2) : 0;
+    const wchar_t value[] = { glyph, L'\0' };
+    cchar_t icon;
+
+    if (wcwidth(glyph) == 1 && setcchar(&icon, value, A_BOLD, pair, NULL) == OK) {
+        mvadd_wch(y, x, &icon);
+
+        return;
+    }
+
+    attron(A_BOLD | COLOR_PAIR(pair));
+    mvaddch(y, x, incoming ? 'v' : '^');
+    attroff(A_BOLD | COLOR_PAIR(pair));
+}
+
+static void traffic_heading(int y, int x, const char *label, int incoming) {
+    text(y, x, 10, A_DIM, "%10s", label);
+    direction_icon(y, x + 8 - (int)strlen(label), incoming);
 }
 
 static void draw_border(struct panel p, const char *title, int focused) {
@@ -182,22 +211,26 @@ static void overview(struct panel p, const struct tui_snapshot *snapshot, int64_
     bytes(snapshot->bytes_up, up);
     age(now, snapshot->latest_packet, latest);
     text(p.y + 1, p.x + 2, p.width - 4, 0,
-         "Totals: Down %s  Up %s   Conversations %" PRIu64 "   Remote IPs %" PRIu64,
+         "Totals:   Down %s    Up %s   Conversations %" PRIu64 "   Remote IPs %" PRIu64,
          down, up, snapshot->conversations, snapshot->remote_ips);
+    direction_icon(p.y + 1, p.x + 10, 1);
+    direction_icon(p.y + 1, p.x + 19 + (int)strlen(down), 0);
 
     if (snapshot->rates_valid) {
         bytes(snapshot->rate_down, down);
         bytes(snapshot->rate_up, up);
-        text(p.y + 2, p.x + 2, p.width - 4, COLOR_PAIR(2),
-             "DB delta rate: Down %s/s  Up %s/s   Latest packet: %s ago", down, up,
+        text(p.y + 2, p.x + 2, p.width - 4, 0,
+             "DB delta rate:   Down %s/s    Up %s/s   Latest packet: %s ago", down, up,
              snapshot->has_packets ? latest : "none");
+        direction_icon(p.y + 2, p.x + 17, 1);
+        direction_icon(p.y + 2, p.x + 28 + (int)strlen(down), 0);
     } else {
         text(p.y + 2, p.x + 2, p.width - 4, A_DIM,
              "DB delta rate: waiting for next sample   Latest packet: %s",
              snapshot->has_packets ? latest : "none");
     }
 
-    const size_t capacity = (size_t)(p.width - 38) < TUI_HISTORY ? (size_t)(p.width - 38) : TUI_HISTORY;
+    const size_t capacity = (size_t)(p.width - 40) < TUI_HISTORY ? (size_t)(p.width - 40) : TUI_HISTORY;
     const size_t count = snapshot->history_count < capacity ? snapshot->history_count : capacity;
     const size_t start = snapshot->history_count - count;
     double peak = 0;
@@ -242,7 +275,8 @@ static void overview(struct panel p, const struct tui_snapshot *snapshot, int64_
         graph[capacity] = '\0';
 
         text(p.y + 3 + direction, p.x + 2, p.width - 4, A_BOLD | COLOR_PAIR(direction == 0 ? 1 : 2),
-             "%s [%s] %.0fs | 0..%s/s", direction == 0 ? "Down" : "Up  ", graph, seconds, scale);
+             "  %s [%s] %.0fs | 0..%s/s", direction == 0 ? "Down" : "Up  ", graph, seconds, scale);
+        direction_icon(p.y + 3 + direction, p.x + 2, direction == 0);
     }
 }
 
@@ -277,14 +311,16 @@ static void conversation_panel(struct panel p, const struct tui_snapshot *snapsh
     const size_t selected = state->selected[focus];
     const size_t start = selected >= (size_t)visible ? selected - (size_t)visible + 1 : 0;
 
+    text(p.y + 1, p.x + 1, p.width - 2, A_DIM, "  %-*s %-*s",
+         application_width, "Application", endpoint_width, "Endpoint");
+
+    const int down_x = p.x + 5 + application_width + endpoint_width;
+
+    traffic_heading(p.y + 1, down_x, live ? "Down/s" : "Down", 1);
+    traffic_heading(p.y + 1, down_x + 11, live ? "Up/s" : "Up", 0);
+
     if (show_seen) {
-        text(p.y + 1, p.x + 1, p.width - 2, A_DIM,
-             "  %-*s %-*s     Down/s       Up/s   Seen",
-             application_width, "Application", endpoint_width, "Endpoint");
-    } else {
-        text(p.y + 1, p.x + 1, p.width - 2, A_DIM,
-             live ? "  %-*s %-*s     Down/s       Up/s" : "  %-*s %-*s       Down         Up",
-             application_width, "Application", endpoint_width, "Endpoint");
+        text(p.y + 1, down_x + 22, 6, A_DIM, "%6s", "Seen");
     }
 
     for (int i = 0; i < visible && start + (size_t)i < count; i++) {
@@ -350,8 +386,9 @@ static void application_panel(struct panel p, const struct tui_snapshot *snapsho
     const size_t selected = state->selected[2];
     const size_t start = selected >= (size_t)visible ? selected - (size_t)visible + 1 : 0;
 
-    text(p.y + 1, p.x + 1, p.width - 2, A_DIM,
-         "  %-*s       Down         Up", name_width, "Application");
+    text(p.y + 1, p.x + 1, p.width - 2, A_DIM, "  %-*s", name_width, "Application");
+    traffic_heading(p.y + 1, p.x + 4 + name_width, "Down", 1);
+    traffic_heading(p.y + 1, p.x + 15 + name_width, "Up", 0);
 
     for (int i = 0; i < visible && start + (size_t)i < snapshot->application_count; i++) {
         const size_t index = start + (size_t)i;

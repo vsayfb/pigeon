@@ -4,7 +4,7 @@ A network watcher daemon written in C. Work in progress.
 
 
 Build and run the tests with CMake, a C compiler, libpcap headers,
-SQLite development headers (version 3.24.0 or newer), and ncurses development headers:
+SQLite development headers (version 3.24.0 or newer), and wide-character ncurses development headers:
 
 ```sh
 cmake -S . -B build
@@ -122,6 +122,10 @@ The viewer needs read access to the database and its SQLite sidecar files. It
 opens an existing schema-version-4 database read-only, never creates or migrates
 it, and does not require capture privileges. Quitting the viewer leaves capture
 running. `--once` prints a snapshot without requiring an interactive terminal.
+
+Cyan `↓` marks incoming/download traffic; green `↑` marks outgoing/upload
+traffic in the overview and column headers. Text labels remain visible, and
+non-Unicode locales use `v` / `^` instead. LAN detection is not implemented.
 
 The screen contains Traffic overview, Live traffic, Top Conversations,
 Applications, and New endpoints. Wide terminals show all panels; smaller

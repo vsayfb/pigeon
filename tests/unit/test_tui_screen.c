@@ -1,4 +1,5 @@
 #include <curses.h>
+#include <locale.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -95,7 +96,22 @@ static void test_endpoint_abbreviations(void) {
     free(snapshot);
 }
 
-int main(void) {
+static void check_direction_icon(int y, int x, wchar_t expected, short expected_pair) {
+    cchar_t cell;
+    wchar_t value[CCHARW_MAX];
+    attr_t attributes;
+    short pair;
+
+    CHECK(mvwin_wch(curscr, y, x, &cell) == OK);
+    CHECK(getcchar(&cell, value, &attributes, &pair, NULL) == OK);
+    CHECK(value[0] == expected);
+    CHECK((attributes & A_BOLD) != 0);
+    CHECK(pair == expected_pair);
+}
+
+static void test_ascii_icons(void) {
+    CHECK(setlocale(LC_ALL, "C") != NULL);
+
     FILE *output = tmpfile();
     FILE *input = tmpfile();
 
@@ -107,6 +123,39 @@ int main(void) {
     struct tui_screen state = { 0 };
 
     CHECK(terminal != NULL && snapshot != NULL);
+    CHECK(resizeterm(16, 60) == OK);
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK((mvwinch(curscr, 3, 10) & A_CHARTEXT) == 'v');
+    CHECK((mvwinch(curscr, 3, 22) & A_CHARTEXT) == '^');
+    CHECK(contains("Down/s"));
+    CHECK(contains("Up/s"));
+
+    endwin();
+    delscreen(terminal);
+    free(snapshot);
+    fclose(input);
+    fclose(output);
+}
+
+int main(void) {
+    CHECK(setlocale(LC_ALL, "C.UTF-8") != NULL);
+
+    FILE *output = tmpfile();
+    FILE *input = tmpfile();
+
+    CHECK(output != NULL && input != NULL);
+
+    SCREEN *terminal = newterm("xterm", output, input);
+    struct tui_snapshot *snapshot = calloc(1, sizeof *snapshot);
+    struct tui_options options = { .recent_seconds = 30 };
+    struct tui_screen state = { 0 };
+
+    CHECK(terminal != NULL && snapshot != NULL);
+    CHECK(start_color() == OK);
+    CHECK(use_default_colors() == OK);
+    CHECK(init_pair(1, COLOR_CYAN, -1) == OK);
+    CHECK(init_pair(2, COLOR_GREEN, -1) == OK);
+    CHECK(init_pair(3, COLOR_YELLOW, -1) == OK);
     CHECK(resizeterm(40, 180) == OK);
 
     snapshot->live_count = snapshot->top_count = 1;
@@ -126,6 +175,12 @@ int main(void) {
     snapshot->history[1] = (struct tui_sample) { .down = 0, .up = 512, .seconds = 3 };
 
     tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    check_direction_icon(3, 10, L'\u2193', 1);
+    check_direction_icon(3, 22, L'\u2191', 2);
+    check_direction_icon(5, 2, L'\u2193', 1);
+    check_direction_icon(6, 2, L'\u2191', 2);
+    check_direction_icon(9, 63, L'\u2193', 1);
+    check_direction_icon(9, 76, L'\u2191', 2);
     CHECK(contains("Live traffic"));
     CHECK(contains("Top Conversations"));
     CHECK(contains("New endpoints"));
@@ -279,6 +334,7 @@ int main(void) {
     free(snapshot);
     fclose(input);
     fclose(output);
+    test_ascii_icons();
 
     return 0;
 }
