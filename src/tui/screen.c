@@ -507,7 +507,7 @@ static void modal(const struct tui_snapshot *snapshot, const struct tui_screen *
             "f               Protocol: any / TCP / UDP / ICMP / ICMPv6 / ESP", "v               Address family: any / IPv4 / IPv6",
             "p               Pause auto-refresh; collector keeps running", "q / Ctrl-C      Quit viewer; collector keeps running",
             "Rates are database counter deltas, not NIC speed.", "IO: down=incoming, up=outgoing; observed packet directions.",
-            "Graphs: old -> new, shared scale; _ is zero, @ is peak.", "No collector heartbeat is stored. Idle is not stopped.",
+            "Graphs: old -> new, shared scale; _ is zero, @ is peak.", "i: choose collector capture interface (local control socket)",
             "d: details | a: all apps | Esc: clear app filter and search", "Names are recorded DNS associations, not service proof."
         };
 
@@ -653,7 +653,7 @@ void tui_screen_draw(const struct tui_snapshot *snapshot, const struct tui_optio
          "%s", error[0] ? error : state->focus == 2
          ? "Tab panel | arrows select | Enter filter app | / search | s sort | p pause"
          : "Tab panel | arrows select | Enter details | / search | s sort | r recent | f/v filters | p pause");
-    text(LINES - 1, 1, COLS - 2, A_DIM, "l live sort | a all apps | d details | ? help | q quit | Lists show up to 200 matches");
+    text(LINES - 1, 1, COLS - 2, A_DIM, "i interfaces | l live sort | a all apps | d details | ? help | q quit");
 
     if (state->details || state->help) {
         modal(snapshot, state);
@@ -723,6 +723,9 @@ int tui_screen_key(int key, const struct tui_snapshot *snapshot,
     size_t *selected = &state->selected[state->focus];
 
     switch (key) {
+        case 'i':
+            return TUI_KEY_INTERFACES;
+
         case '\t':
             state->focus = (state->focus + 1) % 4;
             break;

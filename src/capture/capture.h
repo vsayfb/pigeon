@@ -2,6 +2,23 @@
 #define PIGEON_CAPTURE_H
 
 #include <stdint.h>
+#include <stddef.h>
+
+/* Selects an openable Ethernet capture source with a selectable descriptor.
+ * Automatic selection prefers the routed interface, then an up/running,
+ * non-loopback interface with an IP address (in libpcap enumeration order).
+ * Explicit selection probes only preferred. Requires capture privileges.
+ * Writes the selected name on success; leaves out untouched on failure.
+ * Selection is a startup snapshot, not monitoring or automatic failover. */
+int capture_select_interface(const char *preferred, int explicit_selection,
+                             char *out, size_t capacity);
+
+/* Writes tab-delimited interface inventory; see control/control.h. */
+int capture_interface_list(char *out, size_t capacity);
+
+struct capture_source;
+struct capture_source *capture_source_open(const char *name);
+void capture_source_close(struct capture_source *source);
 
 /*
  * Per-packet callback.
@@ -45,8 +62,15 @@ typedef void (*capture_tick_cb)(int64_t now, void *user);
  * capture descriptor. NULL tick preserves capture_run_live() behavior. */
 int capture_run_live_tick(const char *ifname, capture_cb cb, capture_tick_cb tick, void *user);
 
+/* Consumes source, including on error. Prepared before a source switch so
+ * opening failures do not interrupt the current capture. */
+int capture_source_run(struct capture_source *source, capture_cb cb, capture_tick_cb tick, void *user);
+
 /* Requests termination of the current capture loop. Intended for callbacks;
  * has no effect when no capture is running. */
 void capture_stop(void);
+
+/* Distinguishes user termination from a requested interface switch. */
+int capture_was_signalled(void);
 
 #endif

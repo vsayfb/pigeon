@@ -6,6 +6,7 @@
 #include <pcap/pcap.h>
 #include <signal.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Context handed to libpcap: the caller's callback and its user pointer. */
@@ -17,6 +18,7 @@ struct trampoline {
 /* Handle of the running capture, or NULL. Read by the signal handler. */
 static pcap_t *volatile active_handle;
 static volatile sig_atomic_t stop_requested;
+static volatile sig_atomic_t signalled;
 
 /* Local failures are already reported; do not ask libpcap for their errors. */
 #define CAPTURE_LOCAL_ERROR (-1000)
@@ -33,6 +35,7 @@ static void on_pcap_packet(u_char *arg, const struct pcap_pkthdr *hdr,
 static void on_stop_signal(int signo) {
     (void)signo;
 
+    signalled = 1;
     stop_requested = 1;
 
     pcap_t *handle = active_handle;
@@ -154,6 +157,7 @@ static int run_loop(pcap_t *handle, capture_cb cb, capture_tick_cb tick, void *u
 
     /* Set before installing handlers so no signal can arrive unseen. */
     stop_requested = 0;
+    signalled = 0;
     active_handle = handle;
 
     if (install_stop_handler(SIGINT, &old_int) == -1) {
@@ -239,4 +243,58 @@ void capture_stop(void) {
 
 int capture_run_live(const char *ifname, capture_cb cb, void *user) {
     return capture_run_live_tick(ifname, cb, NULL, user);
+}
+
+struct capture_source {
+    pcap_t *handle;
+};
+
+struct capture_source *capture_source_open(const char *name) {
+    char error[PCAP_ERRBUF_SIZE] = "";
+    pcap_t *handle = pcap_open_live(name, 65535, 0, 1000, error);
+
+    if (handle == NULL) {
+        fprintf(stderr, "pcap_open_live(%s): %s\n", name, error);
+
+        return NULL;
+    }
+
+    if (pcap_datalink(handle) != DLT_EN10MB || pcap_get_selectable_fd(handle) == -1 ||
+        pcap_setnonblock(handle, 1, error) == -1) {
+        fprintf(stderr, "cannot prepare supported capture on %s: %s\n", name, error);
+        pcap_close(handle);
+
+        return NULL;
+    }
+
+    struct capture_source *source = malloc(sizeof *source);
+
+    if (source == NULL) {
+        pcap_close(handle);
+
+        return NULL;
+    }
+
+    source->handle = handle;
+
+    return source;
+}
+
+void capture_source_close(struct capture_source *source) {
+    if (source != NULL) {
+        pcap_close(source->handle);
+        free(source);
+    }
+}
+
+int capture_source_run(struct capture_source *source, capture_cb cb, capture_tick_cb tick, void *user) {
+    pcap_t *handle = source->handle;
+
+    free(source);
+
+    return run_loop(handle, cb, tick, user);
+}
+
+int capture_was_signalled(void) {
+    return signalled != 0;
 }

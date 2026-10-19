@@ -271,7 +271,29 @@ static void test_local_setup_and_poll_failures(void) {
     CHECK(error[0] == '\0');
 }
 
+static void test_prepared_source(void) {
+    reset_case();
+
+    struct capture_source *source = capture_source_open("fake");
+
+    CHECK(source != NULL && closes == 0);
+    CHECK(capture_source_run(source, no_packets, idle_tick, &fake_handle) == 0);
+    CHECK(closes == 1 && ticks == 3 && !capture_was_signalled());
+
+    reset_case();
+    source = capture_source_open("fake");
+    CHECK(source != NULL);
+    capture_source_close(source);
+    CHECK(closes == 1);
+
+    reset_case();
+    selectable_fd = -1;
+    CHECK(capture_source_open("fake") == NULL && closes == 1);
+    reset_case();
+}
+
 int main(void) {
+    test_prepared_source();
     test_idle_stop(0);
     test_idle_stop(SIGINT);
     test_idle_stop(SIGTERM);

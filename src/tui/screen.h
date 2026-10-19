@@ -5,6 +5,7 @@
 
 #define TUI_KEY_QUIT 1
 #define TUI_KEY_REFRESH 2
+#define TUI_KEY_INTERFACES 4
 
 struct tui_screen {
     int focus;                /* live, top conversations, applications, new endpoints */

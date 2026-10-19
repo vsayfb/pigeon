@@ -24,6 +24,8 @@ find_package(Threads REQUIRED)
 
 add_library(pigeon_core STATIC
         src/capture/capture.c
+        src/capture/select.c
+        src/control/control.c
         src/proto/ethernet.c
         src/proto/ipv4.c
         src/proto/ipv6.c
@@ -173,7 +175,7 @@ find_package(Curses REQUIRED)
 add_library(pigeon_tui_data STATIC src/tui/model.c src/proto/address.c)
 target_link_libraries(pigeon_tui_data PUBLIC SQLite::SQLite3)
 
-add_executable(pigeon-tui src/tui/main.c src/tui/screen.c)
+add_executable(pigeon-tui src/tui/main.c src/tui/screen.c src/tui/interfaces.c src/control/control.c)
 target_include_directories(pigeon-tui PRIVATE ${CURSES_INCLUDE_DIRS})
 target_compile_definitions(pigeon-tui PRIVATE _XOPEN_SOURCE=700 _XOPEN_SOURCE_EXTENDED=1)
 target_link_libraries(pigeon-tui PRIVATE pigeon_tui_data ${CURSES_LIBRARIES})
@@ -232,3 +234,27 @@ add_test(NAME vlan_esp_replay COMMAND ${CMAKE_COMMAND}
         -DFIXTURE=${CMAKE_SOURCE_DIR}/tests/fixtures/vlan_esp_conversations.pcap
         -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
         -P ${CMAKE_SOURCE_DIR}/tests/integration/test_vlan_esp.cmake)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(test_capture_select tests/unit/test_capture_select.c)
+    target_link_libraries(test_capture_select PRIVATE pigeon_core)
+    target_link_options(test_capture_select PRIVATE
+            -Wl,--wrap=pcap_findalldevs -Wl,--wrap=pcap_freealldevs
+            -Wl,--wrap=pcap_open_live -Wl,--wrap=pcap_datalink
+            -Wl,--wrap=pcap_get_selectable_fd -Wl,--wrap=pcap_close)
+    add_test(NAME capture_select COMMAND test_capture_select)
+endif()
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(test_control tests/unit/test_control.c)
+    target_link_libraries(test_control PRIVATE pigeon_core)
+    add_test(NAME control COMMAND test_control)
+
+    add_executable(test_capture_switch tests/unit/test_capture_switch.c)
+    target_link_libraries(test_capture_switch PRIVATE pigeon_core)
+    target_link_options(test_capture_switch PRIVATE
+            -Wl,--wrap=netif_select -Wl,--wrap=netif_addresses
+            -Wl,--wrap=capture_select_interface -Wl,--wrap=capture_source_open
+            -Wl,--wrap=capture_source_close -Wl,--wrap=capture_stop)
+    add_test(NAME capture_switch COMMAND test_capture_switch)
+endif()

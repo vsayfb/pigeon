@@ -405,6 +405,8 @@ int main(void) {
     tui_screen_key(KEY_BTAB, snapshot, &options, &state);
     CHECK(state.focus == 3);
 
+    CHECK(tui_screen_key('i', snapshot, &options, &state) == TUI_KEY_INTERFACES);
+
     test_row_directions();
     test_endpoint_abbreviations();
 

@@ -21,12 +21,19 @@ Replay a fixture with packet details:
 Live capture is currently Linux only and requires capture privileges.
 Run `./build/pigeon --verbose` to select the capture interface from the IPv4
 route to `1.1.1.1`, falling back to an IPv6 route when IPv4 is unavailable.
-Route lookup sends no traffic. `./build/pigeon --verbose <interface>` selects
-an interface explicitly. Startup lists all its assigned IPv4 and IPv6
+The routed interface is preferred when it is up/running, has an IP address,
+and provides a supported Ethernet capture format and a selectable descriptor.
+Otherwise, Pigeon tries other active, non-loopback IP interfaces in libpcap
+order and reports the fallback. This can select a physical interface instead
+of an unsupported VPN interface; it does not expose decrypted tunnel traffic.
+Capture privileges are needed to probe the format. No interface is selected
+if none qualifies. Route lookup sends no traffic. `./build/pigeon --verbose <interface>` selects
+an interface explicitly, without automatic fallback. Startup lists all its assigned IPv4 and IPv6
 addresses, including IPv6 temporary and link-local addresses.
 
 Address discovery happens once at startup; address and route changes are not
-tracked. Capture remains on one interface. Offline replay skips discovery.
+tracked automatically. Capture remains on one interface at a time; the viewers
+can request a source change. Offline replay skips discovery.
 Other platforms report ENOSYS for discovery.
 
 Omit `--verbose` to disable packet output; startup,
@@ -390,3 +397,27 @@ Restart the collector and viewers after deploying this change.
 Regenerate the synthetic fixture with `python3 tests/fixtures/make_vlan_esp.py`.
 Protocol references: [ESP](https://www.rfc-editor.org/rfc/rfc4303.html#section-2)
 and [ESP-in-UDP](https://www.rfc-editor.org/rfc/rfc3948.html#section-2).
+
+Capture interface selection from viewers
+----------------------------------------
+
+Start the collector normally, then press **i** in `pigeon-tui`, or use the
+GUI's **Interfaces** button. The selector shows the current source and each
+interface's active/support status. Choose **Automatic** or an active supported
+interface. Automatic selects once, rather than following future route changes.
+The collector opens the new capture and prepares its local addresses before
+flushing pending counters and switching. Failed preparation keeps the current
+source; recorded SQLite history is preserved. A brief capture gap is possible
+while switching. These controls do not add new capture formats or concurrent
+multi-interface capture.
+
+Control is local to the Linux machine through `<canonical database path>.control`.
+The database remains read-only in both viewers. Root and the user who launched
+the collector are authorized (`SUDO_UID` for `sudo ./build/pigeon`). A collector
+started directly as root accepts only root. Restart the collector after upgrading
+to enable control. Old collectors and copied databases still work for viewing;
+the selector reports control unavailable. The database path plus `.control`
+must fit the 107-byte Unix socket pathname limit. The socket is removed on normal
+shutdown; an owned stale socket is recovered after a crash. A second collector
+using the same control socket is rejected. No control socket is used for offline
+replay.

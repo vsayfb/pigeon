@@ -1,10 +1,14 @@
 #include <arpa/inet.h>
 #include <inttypes.h>
+#include <errno.h>
+#include <stdlib.h>
+#include <unistd.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 
 #include "capture/capture.h"
+#include "control/control.h"
 #include "app/app.h"
 #include "net/netif.h"
 #include "flow/flow.h"
@@ -30,6 +34,15 @@ struct capture_context {
     size_t local_count;
     struct dns_cache *dns;
     struct app_resolver *applications;
+    struct control_server *control;
+    struct capture_source *pending_source;
+    struct flow *pending_flows;
+    struct ip_addr pending_locals[64];
+    size_t pending_local_count;
+    struct netif_info pending_info;
+    struct netif_info current_info;
+    int automatic;
+    int pending_automatic;
 };
 
 static void report_flow_error(struct capture_context *context) {
@@ -43,8 +56,92 @@ static void report_flow_error(struct capture_context *context) {
     capture_stop();
 }
 
+static void control_command(const char *request, char *reply, size_t capacity, void *user) {
+    struct capture_context *context = user;
+
+    if (strcmp(request, "LIST") == 0) {
+        const int used = snprintf(reply, capacity, "OK\t%s\t%s\n", context->current_info.name,
+                                  context->automatic ? "auto" : "manual");
+
+        if (used < 0 || (size_t)used >= capacity ||
+            capture_interface_list(reply + used, capacity - (size_t)used) == -1) {
+            snprintf(reply, capacity, "ERROR\tInterface discovery failed\n");
+        }
+
+        return;
+    }
+
+    const int automatic = strcmp(request, "AUTO") == 0;
+    const char *name = strncmp(request, "SELECT ", 7) == 0 ? request + 7 : NULL;
+
+    if (!automatic && (name == NULL || name[0] == '\0' || strlen(name) >= NETIF_NAME_LEN ||
+                       strpbrk(name, " \t\r\n/") != NULL)) {
+        snprintf(reply, capacity, "ERROR\tInvalid interface request\n");
+
+        return;
+    }
+
+    struct netif_info preferred = { 0 };
+    struct netif_info info;
+    char selected[NETIF_NAME_LEN];
+    const int have_preferred = netif_select(name, &preferred) == 0;
+    const char *candidate = automatic ? (have_preferred ? preferred.name : NULL) : name;
+
+    if (capture_select_interface(candidate, !automatic, selected, sizeof selected) == -1 ||
+        netif_select(selected, &info) == -1 ||
+        netif_addresses(selected, context->pending_locals, 64, &context->pending_local_count) == -1) {
+        snprintf(reply, capacity, "ERROR\tInterface unavailable or unsupported; capture unchanged\n");
+
+        return;
+    }
+
+    if (strcmp(selected, context->current_info.name) == 0) {
+        context->automatic = automatic;
+        snprintf(reply, capacity, "OK\t%s\t%s\n", selected, automatic ? "auto" : "manual");
+
+        return;
+    }
+
+    struct capture_source *source = capture_source_open(selected);
+    struct flow *flows = flow_create_addresses(context->pending_locals, context->pending_local_count, 4096, 10000);
+
+    if (source == NULL || flows == NULL) {
+        capture_source_close(source);
+        flow_destroy(flows);
+        snprintf(reply, capacity, "ERROR\tCannot prepare interface; capture unchanged\n");
+
+        return;
+    }
+
+    if (flow_flush(context->flows) == -1) {
+        capture_source_close(source);
+        flow_destroy(flows);
+        snprintf(reply, capacity, "ERROR\tCannot flush pending traffic; capture unchanged\n");
+
+        return;
+    }
+
+    flow_set_store(flows, context->store);
+    flow_set_dns_cache(flows, context->dns);
+
+    if (context->applications != NULL) {
+        flow_set_application_resolver(flows, app_resolver_lookup, context->applications);
+    }
+
+    context->pending_source = source;
+    context->pending_flows = flows;
+    context->pending_info = info;
+    context->pending_automatic = automatic;
+    capture_stop();
+    snprintf(reply, capacity, "OK\t%s\t%s\n", selected, automatic ? "auto" : "manual");
+}
+
 static void tick_flows(int64_t now, void *user) {
     struct capture_context *context = user;
+
+    if (!context->failed) {
+        control_server_poll(context->control, control_command, context);
+    }
 
     if (context->dns != NULL) {
         dns_cache_expire(context->dns, now);
@@ -194,7 +291,23 @@ int main(const int argc, char **argv) {
 
         context.local_count = local_count;
     } else {
-        if (netif_select(source, &info) == -1 ||
+        struct netif_info preferred = { 0 };
+        char selected[NETIF_NAME_LEN];
+        const int have_preferred = netif_select(source, &preferred) == 0;
+
+        if (source != NULL && !have_preferred) {
+            perror("interface discovery");
+
+            return 1;
+        }
+
+        const char *candidate = source != NULL ? source : (have_preferred ? preferred.name : NULL);
+
+        if (capture_select_interface(candidate, source != NULL, selected, sizeof selected) == -1) {
+            return 1;
+        }
+
+        if (netif_select(selected, &info) == -1 ||
             netif_addresses(info.name, context.locals, 64, &context.local_count) == -1) {
             perror("interface discovery");
 
@@ -282,7 +395,57 @@ int main(const int argc, char **argv) {
             fprintf(stderr, "    local address %s\n", ip_addr_str(&context.locals[i], address));
         }
 
-        rc = capture_run_live_tick(info.name, observe_frame, tick_flows, &context);
+        context.current_info = info;
+        context.automatic = source == NULL;
+
+        uid_t owner = getuid();
+        const char *sudo_uid = getenv("SUDO_UID");
+
+        if (owner == 0 && sudo_uid != NULL && sudo_uid[0] != '\0') {
+            char *end;
+            const unsigned long value = strtoul(sudo_uid, &end, 10);
+
+            if (*end == '\0' && value <= UINT32_MAX) {
+                owner = (uid_t)value;
+            }
+        }
+
+        context.control = control_server_open(database_path, owner);
+
+        if (context.control == NULL) {
+            perror("collector control unavailable");
+            rc = -1;
+        } else {
+            struct capture_source *live = capture_source_open(info.name);
+
+            rc = live == NULL ? -1 : 0;
+
+            while (live != NULL) {
+                rc = capture_source_run(live, observe_frame, tick_flows, &context);
+                live = NULL;
+
+                if (context.pending_source == NULL || rc == -1 || context.failed || capture_was_signalled()) {
+                    break;
+                }
+
+                flow_destroy(context.flows);
+                context.flows = context.pending_flows;
+                context.pending_flows = NULL;
+                context.local_count = context.pending_local_count;
+                memcpy(context.locals, context.pending_locals, context.local_count * sizeof *context.locals);
+                context.current_info = context.pending_info;
+                context.automatic = context.pending_automatic;
+                live = context.pending_source;
+                context.pending_source = NULL;
+                fprintf(stderr, "capture switched to %s (%s)\n", context.current_info.name,
+                        context.automatic ? "automatic" : "manual");
+            }
+        }
+
+        control_server_close(context.control);
+        context.control = NULL;
+        capture_source_close(context.pending_source);
+        flow_destroy(context.pending_flows);
     }
 
     fprintf(stderr, "pigeon stopped after %lu packets\n", context.count);

@@ -4,3 +4,4 @@ cmake-build-*/
 *.db
 *.db-wal
 *.db-shm
+*.db.control

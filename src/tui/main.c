@@ -1,5 +1,6 @@
 #include "tui/model.h"
 #include "tui/screen.h"
+#include "tui/interfaces.h"
 
 #include <curses.h>
 #include <inttypes.h>
@@ -170,6 +171,11 @@ static int run_screen(struct tui_reader *reader, struct tui_snapshot *snapshot,
 
         const int key = wgetch(stdscr);
         const int action_flags = tui_screen_key(key, snapshot, &options, &state);
+
+        if (action_flags & TUI_KEY_INTERFACES) {
+            tui_interfaces(path, &stopping);
+            forced_refresh = 1;
+        }
 
         if (action_flags & TUI_KEY_QUIT) {
             break;
