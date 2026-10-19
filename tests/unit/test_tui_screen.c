@@ -37,13 +37,14 @@ int main(void) {
     struct tui_screen state = { 0 };
 
     CHECK(terminal != NULL && snapshot != NULL);
-    CHECK(resizeterm(40, 140) == OK);
+    CHECK(resizeterm(40, 180) == OK);
 
     snapshot->live_count = snapshot->top_count = 1;
     CHECK(ip_addr_parse("2001:db8::10", &snapshot->live[0].key.us_ip) == 0);
     CHECK(ip_addr_parse("2001:db8::42", &snapshot->live[0].key.remote_ip) == 0);
     snapshot->live[0].key.protocol = 6;
     snapshot->live[0].key.remote_port = 443;
+    strcpy(snapshot->live[0].key.application, "firefox");
     snprintf(snapshot->live[0].name, sizeof snapshot->live[0].name, "v6.test");
     snapshot->top[0] = snapshot->live[0];
     snapshot->history_count = 2;
@@ -54,6 +55,7 @@ int main(void) {
     CHECK(contains("Live traffic"));
     CHECK(contains("Top Conversations"));
     CHECK(contains("New endpoints"));
+    CHECK(contains("firefox"));
     CHECK(contains("v6.test -> 2001:db8::42"));
     CHECK(contains("v6.test -> [2001:db8::42]:443/tcp"));
     CHECK(contains("5s | 0..1.0 KiB/s"));
@@ -76,6 +78,7 @@ int main(void) {
     tui_screen_key('\n', snapshot, &options, &state);
     tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
     CHECK(contains("2001:db8::42"));
+    CHECK(contains("Application: firefox"));
     tui_screen_key(KEY_DOWN, snapshot, &options, &state);
     tui_screen_key(27, snapshot, &options, &state);
     CHECK(state.details == 0);

@@ -117,9 +117,13 @@ static int initialize_schema(struct store *store) {
         if (execute(store, STORE_MIGRATE_V2_SQL) == -1) {
             goto error;
         }
-    } else if (version != SCHEMA_VERSION) {
+    } else if (version != 3 && version != SCHEMA_VERSION) {
         snprintf(store->error, sizeof store->error,
                  "unsupported schema version %d (expected %d)", version, SCHEMA_VERSION);
+        goto error;
+    }
+
+    if (version >= 1 && version <= 3 && execute(store, STORE_MIGRATE_V3_SQL) == -1) {
         goto error;
     }
 
@@ -249,6 +253,10 @@ static int read_address(sqlite3_stmt *statement, int column, struct ip_addr *add
 }
 
 static int bind_key(sqlite3_stmt *statement, const struct flow_key *key) {
+    if (memchr(key->application, '\0', sizeof key->application) == NULL) {
+        return SQLITE_MISMATCH;
+    }
+
     int rc = bind_address(statement, 1, &key->us_ip);
 
     if (rc == SQLITE_OK) {
@@ -261,6 +269,10 @@ static int bind_key(sqlite3_stmt *statement, const struct flow_key *key) {
 
     if (rc == SQLITE_OK) {
         rc = sqlite3_bind_int(statement, 4, key->protocol);
+    }
+
+    if (rc == SQLITE_OK) {
+        rc = sqlite3_bind_text(statement, 12, key->application, -1, SQLITE_TRANSIENT);
     }
 
     return rc;

@@ -28,7 +28,8 @@ void flow_destroy(struct flow *flow);
  * minimum and maximum observed times. Bytes use payload_wire_len, including
  * payload omitted by capture truncation. Zero-payload packets still count.
  * Outgoing and incoming traffic use the remote endpoint's port; local ports
- * are excluded. The packet and its payload are borrowed only for this call.
+ * are excluded from grouping but passed to the application resolver when set.
+ * Application basenames separate otherwise identical endpoint groups. The packet and its payload are borrowed only for this call.
  * Only TCP/UDP packets with exactly one endpoint equal to local_ip qualify.
  * Unsupported protocols, later fragments, unrelated and local-to-local
  * packets are ignored. At capacity, a new key flushes the oldest entry to
@@ -98,5 +99,13 @@ void flow_set_dns_cache(struct flow *flow, struct dns_cache *cache);
  * Ownership and return values match flow_create(). At least one is required. */
 struct flow *flow_create_addresses(const struct ip_addr *addresses, size_t count,
                                     size_t bucket_count, size_t capacity);
+
+/* Installs a borrowed live ownership resolver. It copies a NUL-terminated
+ * executable basename, or empty for unresolved ownership. Called only for
+ * qualifying TCP/UDP packets with the direction-normalized connection and
+ * local port. NULL disables attribution (including offline replay).
+ * The callback and context must outlive the tracker or be detached. */
+void flow_set_application_resolver(struct flow *flow,
+    void (*resolve)(const struct flow_key *, uint16_t, char [FLOW_APP_LEN], void *), void *user);
 
 #endif

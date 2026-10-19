@@ -75,6 +75,37 @@ waiting for wall-clock time.
 The build requires `libsqlite3-dev`, `libpcap-dev`, and `libncurses-dev` on Debian/Ubuntu.
 See [docs/SCHEMA.md](docs/SCHEMA.md) for the schema and write semantics.
 
+### Application attribution
+
+Live capture groups conversations by local IP, remote IP, remote port, protocol,
+and application. Separate connections and processes running the same executable
+combine under its basename, for example `firefox`. Different applications
+contacting the same endpoint have separate counters. No PID, process lifetime,
+executable path, socket inode, or local port is stored in SQLite.
+
+On Linux, a background worker queries TCP/UDP socket diagnostics over Netlink
+and maps socket inodes through `/proc/<pid>/fd` to `/proc/<pid>/exe`. It refreshes
+about once per second; packet handling uses a cached lookup and never scans
+processes. Exact connections take precedence over unconnected UDP bindings.
+IPv4, IPv6, and connected IPv4-mapped IPv6 sockets are supported. Sampling is
+bounded to 131,072 sockets and 262,144 file descriptors; incomplete/failed
+samples are discarded, and samples older than three seconds are not used.
+
+An empty stored application is displayed as `unresolved`. This includes old
+records, offline replays, inaccessible owners, missed short-lived sockets, and
+conflicting application owners. Existing unresolved counters are never moved
+into a subsequently identified application. Attribution is best effort: sockets
+can close, change owners, or reuse a connection tuple between observations.
+A shared socket or matching UDP bindings resolve only when the observed owners
+agree on the executable name. Process visibility depends on `/proc` permissions;
+capture capabilities alone do not necessarily grant that visibility.
+
+Attribution covers the collector's current network namespace; it does not walk
+container namespaces. Executable basenames are labels, so unrelated binaries
+with the same basename combine. Interpreted programs may appear as `python3`,
+and a browser's subprocesses use their executable names. No attempt is made to
+infer the originating application behind a proxy, VPN, or local resolver.
+
 ### Terminal viewer
 
 Run capture and the viewer in separate terminals, using the same database path:
@@ -88,7 +119,7 @@ sudo ./build/pigeon --db /tmp/pigeon.db
 ```
 
 The viewer needs read access to the database and its SQLite sidecar files. It
-opens an existing schema-version-3 database read-only, never creates or migrates
+opens an existing schema-version-4 database read-only, never creates or migrates
 it, and does not require capture privileges. Quitting the viewer leaves capture
 running. `--once` prints a snapshot without requiring an interactive terminal.
 
@@ -102,7 +133,7 @@ fit at 110 columns by 26 rows. Lists show at most 200 matches.
 | Tab / Shift-Tab | Change panel |
 | Arrows, j/k, PgUp/PgDn, Home/End | Select a row |
 | Enter | Show details; Enter/Esc closes |
-| / | Search recorded name or numeric remote IP; Enter applies |
+| / | Search recorded name, remote IP, or application; Enter applies |
 | Esc | Clear applied search |
 | s | Sort Top Conversations by total, download, or upload |
 | r | Cycle Live traffic window: 30s, 120s, all recorded, 10s |
@@ -122,8 +153,9 @@ payload, including retransmissions. They are not interface speeds or stored
 traffic history. Replay files with old timestamps appear in Top Conversations;
 select the all-recorded Live window to see them there too.
 
-Overview is unfiltered. Search and address-family filters apply to all lists;
-protocol filtering applies to conversations only. New endpoints groups by
+Overview is unfiltered. Name/IP search and address-family filters apply to all lists;
+application search also matches the conversation lists.
+Protocol filtering applies to conversations only. New endpoints groups by
 remote IP across ports and local addresses, ordered by earliest recorded
 first-seen time. When an IP has multiple recorded names, it shows a deterministic
 representative name. DNS associations do not establish service ownership.
@@ -144,7 +176,7 @@ and SQLite. Saved mappings reload at startup and expire according to the minimum
 CNAME/A TTL. Flows look up names on observation and at flush; a late reply can
 name an already flushed conversation without adding its counters again.
 Verbose conversation summaries include `name=...` (`name=-` when unknown).
-Existing schema-version-1/2 databases migrate transactionally to version 3.
+Existing schema-version-1/2/3 databases migrate transactionally to version 4.
 
 The cache keeps the last observed name for a shared IP; stored conversations
 retain their first assigned name. Plaintext UDP/53 A and AAAA responses are learned over IPv4 or IPv6;

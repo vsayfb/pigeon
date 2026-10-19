@@ -20,6 +20,7 @@ include_directories(src)
 
 find_library(PCAP_LIBRARY pcap REQUIRED)
 find_package(SQLite3 3.24 REQUIRED)
+find_package(Threads REQUIRED)
 
 add_library(pigeon_core STATIC
         src/capture/capture.c
@@ -32,11 +33,12 @@ add_library(pigeon_core STATIC
         src/proto/pktdump.c
         src/flow/flow_table.c
         src/flow/flow.c
+        src/app/app.c
         src/store/store.c
         src/dns/dns_parse.c
         src/dns/dns_cache.c
 )
-target_link_libraries(pigeon_core PUBLIC ${PCAP_LIBRARY} SQLite::SQLite3)
+target_link_libraries(pigeon_core PUBLIC ${PCAP_LIBRARY} SQLite::SQLite3 Threads::Threads)
 
 add_executable(pigeon src/main.c)
 target_compile_definitions(pigeon PRIVATE PIGEON_VERSION="0.0.1")
@@ -80,13 +82,13 @@ add_test(NAME cli COMMAND ${CMAKE_COMMAND}
         -P ${CMAKE_SOURCE_DIR}/tests/integration/test_cli.cmake)
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    target_sources(pigeon_core PRIVATE src/net/netif_linux.c)
+    target_sources(pigeon_core PRIVATE src/net/netif_linux.c src/app/app_linux.c)
 
     add_executable(test_netif tests/unit/test_netif.c)
     target_link_libraries(test_netif PRIVATE pigeon_core)
     add_test(NAME netif COMMAND test_netif)
 else()
-    target_sources(pigeon_core PRIVATE src/net/netif_stub.c)
+    target_sources(pigeon_core PRIVATE src/net/netif_stub.c src/app/app_stub.c)
 endif()
 
 add_executable(test_netif_stub tests/unit/test_netif_stub.c src/net/netif_stub.c)
@@ -173,3 +175,13 @@ add_executable(test_tui_screen tests/unit/test_tui_screen.c src/tui/screen.c)
 target_include_directories(test_tui_screen PRIVATE ${CURSES_INCLUDE_DIRS})
 target_link_libraries(test_tui_screen PRIVATE pigeon_tui_data ${CURSES_LIBRARIES})
 add_test(NAME tui_screen COMMAND test_tui_screen)
+
+add_executable(test_app tests/unit/test_app.c)
+target_link_libraries(test_app PRIVATE pigeon_core)
+add_test(NAME app COMMAND test_app)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(test_app_live tests/unit/test_app_live.c)
+    target_link_libraries(test_app_live PRIVATE pigeon_core)
+    add_test(NAME app_live COMMAND test_app_live)
+endif()

@@ -20,6 +20,8 @@ struct flow {
     int64_t last_tick;
     int64_t name_time;
     int clock_set;
+    void (*resolve_application)(const struct flow_key *, uint16_t, char [FLOW_APP_LEN], void *);
+    void *application_user;
 };
 
 static const char *lookup_name(const struct flow *flow, const struct flow_entry *entry) {
@@ -136,6 +138,8 @@ struct flow *flow_create_addresses(const struct ip_addr *addresses, size_t count
     flow->last_tick = 0;
     flow->name_time = 0;
     flow->clock_set = 0;
+    flow->resolve_application = NULL;
+    flow->application_user = NULL;
 
     flow_table_set_eviction_handler(flow->table, handoff_eviction, flow);
 
@@ -182,12 +186,18 @@ int flow_observe(struct flow *flow, const struct packet_view *packet, int64_t no
         destination_port = packet->transport.udp.dst_port;
     }
 
-    const struct flow_key key = {
+    struct flow_key key = {
         .us_ip = outgoing ? source : destination,
         .remote_ip = outgoing ? destination : source,
         .remote_port = outgoing ? destination_port : source_port,
         .protocol = packet_protocol(packet)
     };
+
+    if (flow->resolve_application != NULL) {
+        flow->resolve_application(&key, outgoing ? source_port : destination_port,
+                                  key.application, flow->application_user);
+        key.application[FLOW_APP_LEN - 1] = '\0';
+    }
 
     flow->name_time = now;
     flow->clock_set = 1;
@@ -380,4 +390,10 @@ struct flow *flow_create(uint32_t local_ip, size_t bucket_count, size_t capacity
     const struct ip_addr address = ip_addr_v4(local_ip);
 
     return flow_create_addresses(&address, 1, bucket_count, capacity);
+}
+
+void flow_set_application_resolver(struct flow *flow,
+    void (*resolve)(const struct flow_key *, uint16_t, char [FLOW_APP_LEN], void *), void *user) {
+    flow->resolve_application = resolve;
+    flow->application_user = user;
 }

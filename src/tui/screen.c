@@ -196,7 +196,8 @@ static void conversation_panel(struct panel p, const struct tui_snapshot *snapsh
 
     draw_border(p, title, state->focus == focus);
 
-    const int endpoint_width = p.width - (live ? 24 : 26);
+    const int application_width = p.width >= 80 ? 18 : 12;
+    const int endpoint_width = p.width - (live ? 24 : 26) - application_width - 1;
     const struct tui_conversation *rows = live ? snapshot->live : snapshot->top;
     const size_t count = live ? snapshot->live_count : snapshot->top_count;
     const int visible = p.height - 4;
@@ -204,8 +205,8 @@ static void conversation_panel(struct panel p, const struct tui_snapshot *snapsh
     const size_t start = selected >= (size_t)visible ? selected - (size_t)visible + 1 : 0;
 
     text(p.y + 1, p.x + 1, p.width - 2, A_DIM,
-         live ? "  %-*s Proto  Port   Seen" : "  %-*s       Down         Up",
-         endpoint_width, "Endpoint");
+         live ? "  %-*s %-*s Proto  Port   Seen" : "  %-*s %-*s       Down         Up",
+         application_width, "Application", endpoint_width, "Endpoint");
 
     for (int i = 0; i < visible && start + (size_t)i < count; i++) {
         const size_t index = start + (size_t)i;
@@ -236,12 +237,14 @@ static void conversation_panel(struct panel p, const struct tui_snapshot *snapsh
 
         if (live) {
             text(p.y + 2 + i, p.x + 1, p.width - 2, attributes,
-                 "%c %-*.*s %3s %5u %6.6s", selected == index ? '>' : ' ',
+                 "%c %-*.*s %-*.*s %3s %5u %6.6s", selected == index ? '>' : ' ',
+                 application_width, application_width, row->key.application[0] ? row->key.application : "unresolved",
                  endpoint_width, endpoint_width, label, row->key.protocol == 6 ? "TCP" : "UDP",
                  row->key.remote_port, last);
         } else {
             text(p.y + 2 + i, p.x + 1, p.width - 2, attributes,
-                 "%c %-*.*s %10.10s %10.10s", selected == index ? '>' : ' ',
+                 "%c %-*.*s %-*.*s %10.10s %10.10s", selected == index ? '>' : ' ',
+                 application_width, application_width, row->key.application[0] ? row->key.application : "unresolved",
                  endpoint_width, endpoint_width, label, down, up);
         }
     }
@@ -301,7 +304,7 @@ static void modal(const struct tui_snapshot *snapshot, const struct tui_screen *
     if (state->help) {
         const char *lines[] = {
             "Tab / Shift-Tab  Change focused panel", "Up/Down, j/k     Select row; PgUp/PgDn, Home/End also work",
-            "Enter           Open details; Enter/Esc closes", "/               Search recorded name or numeric remote IP",
+            "Enter           Open details; Enter/Esc closes", "/               Search name, remote IP, or application (conversations)",
             "s               Sort Top Conversations: total/down/up", "r               Live window: 10s / 30s / 120s / all",
             "f               Conversation protocol: any / TCP / UDP", "v               Address family: any / IPv4 / IPv6",
             "p               Pause auto-refresh; collector keeps running", "q / Ctrl-C      Quit viewer; collector keeps running",
@@ -334,6 +337,7 @@ static void modal(const struct tui_snapshot *snapshot, const struct tui_screen *
         } else {
             const struct tui_conversation *row = state->focus == 0 ? &snapshot->live[index] : &snapshot->top[index];
 
+            snprintf(content[count++], 320, "Application: %s", row->key.application[0] ? row->key.application : "unresolved");
             timestamp(row->totals.first_seen, first);
             timestamp(row->totals.last_seen, last);
             snprintf(content[count++], 320, "%s", row->name[0] ? row->name : "Unnamed conversation");
@@ -459,7 +463,7 @@ int tui_screen_key(int key, const struct tui_snapshot *snapshot,
     }
 
     if (state->help || state->details) {
-        const size_t lines = state->help ? 16 : state->focus == 2 ? 5 : 11;
+        const size_t lines = state->help ? 16 : state->focus == 2 ? 5 : 12;
         const int visible = (LINES < 23 ? LINES - 4 : 19) - 3;
         const size_t maximum = visible > 0 && lines > (size_t)visible ? lines - (size_t)visible : 0;
 

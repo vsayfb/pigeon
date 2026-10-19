@@ -102,6 +102,7 @@ static void test_padding_does_not_change_identity(void) {
     a.remote_ip = b.remote_ip = ip_addr_v4(0xC6336414);
     a.remote_port = b.remote_port = 443;
     a.protocol = b.protocol = 6;
+    a.application[0] = b.application[0] = '\0';
 
     CHECK(flow_key_equal(&a, &b));
     CHECK(flow_key_hash(&a) == flow_key_hash(&b));

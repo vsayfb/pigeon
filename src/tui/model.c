@@ -8,11 +8,12 @@
 
 #define CONVERSATION_COLUMNS \
     "us_ip,remote_ip,remote_port,protocol,packets_out,packets_in,bytes_out,bytes_in," \
-    "first_seen,last_seen,coalesce(remote_name,'')"
+    "first_seen,last_seen,coalesce(remote_name,''),application"
 
 #define CONVERSATION_FILTER \
     " WHERE (?1='' OR instr(lower(coalesce(remote_name,'')),lower(?1))>0" \
-    " OR instr(lower(ip_text(remote_ip)),lower(?1))>0)" \
+    " OR instr(lower(ip_text(remote_ip)),lower(?1))>0" \
+    " OR instr(lower(application),lower(?1))>0)" \
     " AND (?2=0 OR protocol=?2) AND (?3=0 OR length(remote_ip)=?3)"
 
 struct tui_reader {
@@ -95,12 +96,12 @@ struct tui_reader *tui_reader_open(const char *path, char error[TUI_ERROR_LEN]) 
     }
 
     const int valid_version = sqlite3_step(version) == SQLITE_ROW &&
-                              sqlite3_column_int(version, 0) == 3;
+                              sqlite3_column_int(version, 0) == 4;
 
     sqlite3_finalize(version);
 
     if (!valid_version) {
-        snprintf(error, TUI_ERROR_LEN, "schema version 3 required; run pigeon to create or migrate it");
+        snprintf(error, TUI_ERROR_LEN, "schema version 4 required; run pigeon to create or migrate it");
         goto error;
     }
 
@@ -117,12 +118,12 @@ struct tui_reader *tui_reader_open(const char *path, char error[TUI_ERROR_LEN]) 
     const char *live = "SELECT " CONVERSATION_COLUMNS " FROM conversations"
                        CONVERSATION_FILTER
                        " AND (?4=0 OR last_seen>=?5) AND last_seen<=?6"
-                       " ORDER BY last_seen DESC,remote_ip,remote_port,protocol,us_ip LIMIT 200";
+                       " ORDER BY last_seen DESC,remote_ip,remote_port,protocol,us_ip,application LIMIT 200";
     const char *top = "SELECT " CONVERSATION_COLUMNS " FROM conversations"
                       CONVERSATION_FILTER
                       " ORDER BY CASE ?4 WHEN 1 THEN bytes_in WHEN 2 THEN bytes_out"
                       " ELSE cast(bytes_in AS REAL)+bytes_out END DESC,"
-                      "last_seen DESC,remote_ip,remote_port,protocol,us_ip LIMIT 200";
+                      "last_seen DESC,remote_ip,remote_port,protocol,us_ip,application LIMIT 200";
     const char *endpoints = "SELECT remote_ip,name,first_seen,last_seen FROM ("
                             "SELECT remote_ip,coalesce(max(remote_name),'') AS name,"
                             "min(first_seen) AS first_seen,max(last_seen) AS last_seen"
@@ -207,6 +208,15 @@ static int read_conversations(sqlite3_stmt *statement, struct tui_conversation *
             return -1;
         }
 
+        const char *application = (const char *)sqlite3_column_text(statement, 11);
+        const int length = sqlite3_column_bytes(statement, 11);
+
+        if (application == NULL || length < 0 || (size_t)length >= sizeof row->key.application ||
+            memchr(application, '\0', (size_t)length) != NULL) {
+            return -1;
+        }
+
+        memcpy(row->key.application, application, (size_t)length + 1);
         snprintf(row->name, sizeof row->name, "%s", name);
     }
 

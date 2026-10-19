@@ -1,12 +1,14 @@
 # SQLite schema
 
-Schema version: **3**, stored in `PRAGMA user_version`.
+Schema version: **4**, stored in `PRAGMA user_version`.
 
 The storage module creates the schema only when version is zero and the
-existing database has no application objects. Versions 1 and 2 migrate
+existing database has no application objects. Versions 1, 2 and 3 migrate
 transactionally: version 1 first gains the DNS table, then integer IPv4 keys
 are converted to 4-byte network-order blobs. Version 3 also accepts 16-byte
-IPv6 keys. Totals, names and timestamps are preserved. Other versions are
+IPv6 keys. Version 4 adds application to the conversation key; existing rows
+receive an empty application because historical ownership is unavailable.
+Totals, names, DNS mappings and timestamps are preserved. Other versions are
 rejected. A failed migration restores the schema, rows and user version.
 Opening a versioned database also prepares the
 conversation statements, which fails if the required table or columns are
@@ -14,16 +16,16 @@ missing.
 
 File databases use WAL, `synchronous=FULL`, and a one-second busy timeout.
 `:memory:` databases retain SQLite's memory journal mode. Each store owns one
-connection and two prepared statements and is used from the capture thread.
+connection and four prepared statements and is used from the capture thread.
 No database server is required. SQLite 3.24.0 or newer is required for upserts.
 
 ## `conversations`
 
-One row represents a remote endpoint aggregate, not an individual TCP
-connection. The table uses `WITHOUT ROWID` and this composite primary key:
+One row represents a remote endpoint aggregate for one application, not an
+individual TCP connection. The table uses `WITHOUT ROWID` and this composite primary key:
 
 ```text
-(us_ip, remote_ip, remote_port, protocol)
+(us_ip, remote_ip, remote_port, protocol, application)
 ```
 
 | Column | Storage | Meaning |
@@ -32,6 +34,7 @@ connection. The table uses `WITHOUT ROWID` and this composite primary key:
 | `remote_ip` | BLOB | Remote IP, same byte length/family as local IP |
 | `remote_port` | INTEGER | Remote endpoint's port, 0–65535 |
 | `protocol` | INTEGER | TCP = 6, UDP = 17 |
+| `application` | TEXT NOT NULL | Executable basename, at most 255 bytes; empty when unresolved |
 | `packets_out` | INTEGER | Cumulative outgoing packet count |
 | `packets_in` | INTEGER | Cumulative incoming packet count |
 | `bytes_out` | INTEGER | Cumulative outgoing transport payload bytes |
@@ -45,7 +48,13 @@ Address blobs use network byte order. For example, `192.0.2.10` is `X'C000020A'`
 the family. IPv4-mapped IPv6 remains a separate 16-byte identity. `hex(remote_ip)`
 is useful when inspecting raw SQLite rows; the executable formats numeric IPs.
 The local ephemeral port is excluded from identity. The same remote address
-and port over TCP and UDP produce different rows.
+and port over TCP and UDP produce different rows. Different application names
+also produce different rows. Connections from multiple processes or restarts
+with the same executable basename combine. Local ports and process/socket
+metadata are used in memory for attribution and are not persisted. Endpoint-only
+totals can be obtained by grouping without `application` and summing counters.
+An empty application is a separate grouping for unresolved ownership, including
+replay and migrated history; those counters are not reassigned after resolution.
 
 Counters are nonnegative signed 64-bit integers. Payload bytes exclude
 Ethernet/IP/transport headers and Ethernet padding; TCP retransmissions are

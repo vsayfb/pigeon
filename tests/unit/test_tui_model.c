@@ -166,7 +166,7 @@ static void test_reader_never_creates_or_migrates(void) {
     CHECK(sqlite3_open(path, &db) == SQLITE_OK);
     CHECK(sqlite3_exec(db, "PRAGMA user_version=2", NULL, NULL, NULL) == SQLITE_OK);
     CHECK(tui_reader_open(path, error) == NULL);
-    CHECK(strstr(error, "schema version 3") != NULL);
+    CHECK(strstr(error, "schema version 4") != NULL);
     CHECK(sqlite3_prepare_v2(db, "PRAGMA user_version", -1, &statement, NULL) == SQLITE_OK);
     CHECK(sqlite3_step(statement) == SQLITE_ROW);
     CHECK(sqlite3_column_int(statement, 0) == 2);
@@ -178,9 +178,56 @@ static void test_reader_never_creates_or_migrates(void) {
     tui_reader_close(NULL);
 }
 
+static void test_application_rows_and_search(void) {
+    char path[] = "/tmp/pigeon-tui-app-XXXXXX";
+    const int fd = mkstemp(path);
+    char error[TUI_ERROR_LEN];
+
+    CHECK(fd != -1);
+    CHECK(close(fd) == 0);
+
+    struct store *store = store_open(path, error);
+    struct store_row rows[] = {
+        make_row("192.0.2.10", "198.51.100.1", 6, 1000, 100, 950, 995, "alpha.test"),
+        make_row("192.0.2.10", "198.51.100.1", 6, 500, 200, 950, 995, "alpha.test"),
+        make_row("192.0.2.10", "198.51.100.1", 6, 100, 50, 950, 995, "alpha.test")
+    };
+
+    strcpy(rows[0].key.application, "firefox");
+    strcpy(rows[1].key.application, "chromium");
+    CHECK(store != NULL);
+    CHECK(store_flush(store, rows, 3) == 0);
+
+    struct tui_reader *reader = tui_reader_open(path, error);
+    struct tui_snapshot *snapshot = calloc(1, sizeof *snapshot);
+    struct tui_options options = { .recent_seconds = 30 };
+
+    CHECK(reader != NULL && snapshot != NULL);
+    CHECK(tui_reader_refresh(reader, &options, 1000, 0, snapshot, error) == 0);
+    CHECK(snapshot->conversations == 3 && snapshot->remote_ips == 1);
+    CHECK(snapshot->bytes_down == 1600 && snapshot->bytes_up == 350);
+    CHECK(snapshot->top_count == 3 && snapshot->live_count == 3);
+    CHECK(snapshot->endpoint_count == 1);
+    CHECK(strcmp(snapshot->top[0].key.application, "firefox") == 0);
+    CHECK(strcmp(snapshot->top[1].key.application, "chromium") == 0);
+    CHECK(snapshot->top[2].key.application[0] == '\0');
+
+    strcpy(options.search, "FIREFOX");
+    CHECK(tui_reader_refresh(reader, &options, 1000, 0.1, snapshot, error) == 0);
+    CHECK(snapshot->top_count == 1 && snapshot->live_count == 1);
+    CHECK(strcmp(snapshot->top[0].key.application, "firefox") == 0);
+    CHECK(snapshot->bytes_down == 1600);
+
+    free(snapshot);
+    tui_reader_close(reader);
+    store_close(store);
+    CHECK(unlink(path) == 0);
+}
+
 int main(void) {
     test_snapshot_queries_and_refresh();
     test_reader_never_creates_or_migrates();
+    test_application_rows_and_search();
 
     puts("tui_model: ok");
 

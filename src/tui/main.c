@@ -40,7 +40,8 @@ static void print_safe(const char *text) {
 static void print_row(const struct tui_conversation *row) {
     char remote[IP_ADDR_STR_LEN];
 
-    printf("%s%s%s:%u %s down=%" PRIu64 " up=%" PRIu64 " name=",
+    print_safe(row->key.application[0] ? row->key.application : "unresolved");
+    printf("  %s%s%s:%u %s down=%" PRIu64 " up=%" PRIu64 " name=",
            row->key.remote_ip.family == 6 ? "[" : "",
            ip_addr_str(&row->key.remote_ip, remote), row->key.remote_ip.family == 6 ? "]" : "",
            row->key.remote_port, row->key.protocol == 6 ? "TCP" : "UDP",

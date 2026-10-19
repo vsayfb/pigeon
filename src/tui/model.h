@@ -63,7 +63,7 @@ struct tui_snapshot {
 
 struct tui_reader;
 
-/* Opens an existing schema-v3 database read-only. Never creates or migrates
+/* Opens an existing schema-v4 database read-only. Never creates or migrates
  * the database. Caller owns the reader and closes it with tui_reader_close().
  * Returns the reader, or NULL with a TUI_ERROR_LEN-byte error explanation. */
 struct tui_reader *tui_reader_open(const char *path, char error[TUI_ERROR_LEN]);
@@ -72,7 +72,8 @@ void tui_reader_close(struct tui_reader *reader);
 
 /* Reads all panels in one short snapshot transaction. now is Unix seconds;
  * monotonic_seconds measures elapsed viewer time. Lists contain at most
- * TUI_MAX_ROWS matches. Rankings are cumulative; recent_seconds applies only
+ * TUI_MAX_ROWS matches. Search matches name/IP/application on conversation
+ * lists, name/IP on endpoints. Rankings are cumulative; recent_seconds applies only
  * to Live Traffic. Protocol filtering applies to conversation lists; endpoint
  * first-seen times always span the complete database. Overview is unfiltered.
  * Rates are estimated from database counter deltas, not packet timestamps.

@@ -5,6 +5,7 @@
 #include <time.h>
 
 #include "capture/capture.h"
+#include "app/app.h"
 #include "net/netif.h"
 #include "flow/flow.h"
 #include "proto/packet.h"
@@ -28,6 +29,7 @@ struct capture_context {
     struct ip_addr locals[64];
     size_t local_count;
     struct dns_cache *dns;
+    struct app_resolver *applications;
 };
 
 static void report_flow_error(struct capture_context *context) {
@@ -109,11 +111,21 @@ static void print_conversation(const struct flow_entry *entry, void *user) {
 
     fprintf(stdout, "flow %s > %s:%u proto=%u packets_out=%" PRIu64
             " packets_in=%" PRIu64 " bytes_out=%" PRIu64 " bytes_in=%" PRIu64
-            " first_seen=%" PRId64 " last_seen=%" PRId64 " name=%s\n",
+            " first_seen=%" PRId64 " last_seen=%" PRId64 " name=%s app=",
             ip_addr_str(&key->us_ip, local), endpoint,
             key->remote_port, key->protocol, delta->packets_out, delta->packets_in,
             delta->bytes_out, delta->bytes_in, delta->first_seen, delta->last_seen,
             row.remote_name[0] != '\0' ? row.remote_name : "-");
+
+    const char *application = key->application[0] ? key->application : "unresolved";
+
+    for (size_t i = 0; application[i] != '\0'; i++) {
+        const unsigned char byte = (unsigned char)application[i];
+
+        putchar(byte >= 32 && byte <= 126 ? byte : '?');
+    }
+
+    putchar('\n');
 }
 
 int main(const int argc, char **argv) {
@@ -227,6 +239,16 @@ int main(const int argc, char **argv) {
 
         flow_set_store(context.flows, context.store);
         flow_set_dns_cache(context.flows, context.dns);
+
+        if (!offline) {
+            context.applications = app_resolver_create();
+
+            if (context.applications == NULL) {
+                perror("application attribution unavailable");
+            } else {
+                flow_set_application_resolver(context.flows, app_resolver_lookup, context.applications);
+            }
+        }
     }
 
     int rc;
@@ -266,6 +288,7 @@ int main(const int argc, char **argv) {
     }
 
     flow_destroy(context.flows);
+    app_resolver_destroy(context.applications);
     dns_cache_destroy(context.dns);
     store_close(context.store);
 
