@@ -25,13 +25,12 @@ add_library(pigeon_core STATIC
         src/proto/ethernet.c
         src/proto/ipv4.c
         src/proto/transport.c
+        src/proto/packet.c
+        src/proto/pktdump.c
 )
 target_link_libraries(pigeon_core PUBLIC ${PCAP_LIBRARY})
 
-add_executable(pigeon src/main.c
-        src/proto/bytes.h
-        src/proto/ethernet.c
-)
+add_executable(pigeon src/main.c)
 target_compile_definitions(pigeon PRIVATE PIGEON_VERSION="0.0.1")
 target_link_libraries(pigeon PRIVATE pigeon_core)
 
@@ -60,3 +59,14 @@ target_compile_definitions(test_transport PRIVATE
         PIGEON_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
 target_link_libraries(test_transport PRIVATE pigeon_core)
 add_test(NAME transport COMMAND test_transport)
+
+add_executable(test_packet tests/unit/test_packet.c)
+target_compile_definitions(test_packet PRIVATE
+        PIGEON_FIXTURE_DIR="${CMAKE_SOURCE_DIR}/tests/fixtures")
+target_link_libraries(test_packet PRIVATE pigeon_core)
+add_test(NAME packet COMMAND test_packet)
+
+add_test(NAME cli COMMAND ${CMAKE_COMMAND}
+        -DPIGEON=$<TARGET_FILE:pigeon>
+        -DFIXTURE=${CMAKE_SOURCE_DIR}/tests/fixtures/short_frames.pcap
+        -P ${CMAKE_SOURCE_DIR}/tests/integration/test_cli.cmake)

@@ -9,8 +9,15 @@ int ipv4_parse(const uint8_t *data, const size_t len, struct ipv4_view *out) {
         return -1;
     }
 
-    /* Byte 0: version in the high 4 bits, IHL (in 4-byte words) in the low 4. */
+    /* data[0]: 0th byte
+     * left nibble: version
+     * right nibble: IHL
+    */
+
+    // left nibble
     const unsigned version = data[0] >> 4;
+
+    // right nibble -> * 4 because IHL is measured in 32-bit words (4 bytes).
     const size_t header_len = (size_t)(data[0] & 0x0F) * 4;
 
     if (version != 4) {
