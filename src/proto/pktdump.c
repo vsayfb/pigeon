@@ -47,5 +47,11 @@ void pktdump(FILE *stream, const struct packet_view *packet) {
 
         fprintf(stream, "    UDP %u > %u payload=%zu\n",
                 udp->src_port, udp->dst_port, udp->payload_wire_len);
+    } else if (packet->kind == PACKET_ICMP || packet->kind == PACKET_ICMPV6) {
+        const struct icmp_view *icmp = &packet->transport.icmp;
+
+        fprintf(stream, "    %s type=%u code=%u hdr=%u payload=%zu\n",
+                protocol_name(packet_protocol(packet)), icmp->type, icmp->code,
+                icmp->header_len, icmp->payload_wire_len);
     }
 }

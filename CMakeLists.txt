@@ -29,6 +29,7 @@ add_library(pigeon_core STATIC
         src/proto/ipv6.c
         src/proto/address.c
         src/proto/transport.c
+        src/proto/icmp.c
         src/proto/packet.c
         src/proto/pktdump.c
         src/flow/flow_table.c
@@ -194,3 +195,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_libraries(test_app_live PRIVATE pigeon_core)
     add_test(NAME app_live COMMAND test_app_live)
 endif()
+
+add_executable(test_icmp tests/unit/test_icmp.c)
+target_link_libraries(test_icmp PRIVATE pigeon_core)
+add_test(NAME icmp COMMAND test_icmp)
+
+add_test(NAME icmp_replay COMMAND ${CMAKE_COMMAND}
+        -DPIGEON=$<TARGET_FILE:pigeon>
+        -DFIXTURE=${CMAKE_SOURCE_DIR}/tests/fixtures/icmp_conversations.pcap
+        -DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}
+        -P ${CMAKE_SOURCE_DIR}/tests/integration/test_icmp.cmake)

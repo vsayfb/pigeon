@@ -40,6 +40,16 @@ int LLVMFuzzerTestOneInput(const uint8_t *data, size_t size) {
         }
     }
 
+    if (packet.kind == PACKET_ICMP || packet.kind == PACKET_ICMPV6) {
+        const struct icmp_view *icmp = &packet.transport.icmp;
+
+        if (icmp->payload < data || icmp->payload > data + size ||
+            icmp->payload_len > size - (size_t)(icmp->payload - data) ||
+            icmp->payload_len > icmp->payload_wire_len) {
+            abort();
+        }
+    }
+
     return 0;
 }
 

@@ -7,9 +7,7 @@
 #define IPV4_MIN_HEADER_LEN 20
 #define IPV4_STR_LEN        16      /* "255.255.255.255" plus the NUL */
 
-#define IP_PROTO_ICMP 1
-#define IP_PROTO_TCP  6
-#define IP_PROTO_UDP  17
+#include "proto/protocol.h"
 
 /*
 Decoded IPv4 header and the bytes that follow it.

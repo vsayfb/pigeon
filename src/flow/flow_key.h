@@ -11,7 +11,7 @@
 struct flow_key {
     struct ip_addr us_ip;
     struct ip_addr remote_ip;
-    uint16_t remote_port;       /* host byte order */
+    uint16_t remote_port;       /* host byte order; zero sentinel for ICMP/ICMPv6 */
     uint8_t protocol;
     char application[FLOW_APP_LEN]; /* executable basename; empty means unresolved */
 };

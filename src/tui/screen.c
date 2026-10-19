@@ -1,4 +1,5 @@
 #include "tui/screen.h"
+#include "proto/protocol.h"
 
 #include <curses.h>
 #include <inttypes.h>
@@ -339,9 +340,13 @@ static void conversation_panel(struct panel p, const struct tui_snapshot *snapsh
 
         ip_addr_str(&row->key.remote_ip, address);
 
-        snprintf(endpoint, sizeof endpoint, "%s%s%s:%u/%s", row->key.remote_ip.family == 6 ? "[" : "",
-                 address, row->key.remote_ip.family == 6 ? "]" : "",
-                 row->key.remote_port, row->key.protocol == 6 ? "tcp" : "udp");
+        if (protocol_has_ports(row->key.protocol)) {
+            snprintf(endpoint, sizeof endpoint, "%s%s%s:%u/%s", row->key.remote_ip.family == 6 ? "[" : "",
+                     address, row->key.remote_ip.family == 6 ? "]" : "",
+                     row->key.remote_port, protocol_label(row->key.protocol));
+        } else {
+            snprintf(endpoint, sizeof endpoint, "%s/%s", address, protocol_label(row->key.protocol));
+        }
         endpoint_label(row->name, endpoint, endpoint_width, label);
         age(now, row->totals.last_seen, last);
 
@@ -499,7 +504,7 @@ static void modal(const struct tui_snapshot *snapshot, const struct tui_screen *
             "Tab / Shift-Tab  Change focused panel", "Up/Down, j/k     Select row; PgUp/PgDn, Home/End also work",
             "Enter           Details; on Applications: filter conversations", "/               Search name, remote IP, or application (conversations)",
             "s: cumulative sort | l: live recency/total/down/up", "r               Live window: 10s / 30s / 120s / all",
-            "f               Conversation protocol: any / TCP / UDP", "v               Address family: any / IPv4 / IPv6",
+            "f               Protocol: any / TCP / UDP / ICMP / ICMPv6", "v               Address family: any / IPv4 / IPv6",
             "p               Pause auto-refresh; collector keeps running", "q / Ctrl-C      Quit viewer; collector keeps running",
             "Rates are database counter deltas, not NIC speed.", "IO: down=incoming, up=outgoing; observed packet directions.",
             "Graphs: old -> new, shared scale; _ is zero, @ is peak.", "No collector heartbeat is stored. Idle is not stopped.",
@@ -549,7 +554,11 @@ static void modal(const struct tui_snapshot *snapshot, const struct tui_screen *
             snprintf(content[count++], 320, "%s", ip_addr_str(&row->key.remote_ip, address));
             snprintf(content[count++], 320, "Local IP:");
             snprintf(content[count++], 320, "%s", ip_addr_str(&row->key.us_ip, address));
-            snprintf(content[count++], 320, "%s, remote port %u", row->key.protocol == 6 ? "TCP" : "UDP", row->key.remote_port);
+            if (protocol_has_ports(row->key.protocol)) {
+                snprintf(content[count++], 320, "%s, remote port %u", protocol_name(row->key.protocol), row->key.remote_port);
+            } else {
+                snprintf(content[count++], 320, "%s, no ports", protocol_name(row->key.protocol));
+            }
             snprintf(content[count++], 320, "Download: %" PRIu64 " bytes, %" PRIu64 " packets", row->totals.bytes_in, row->totals.packets_in);
             snprintf(content[count++], 320, "Upload:   %" PRIu64 " bytes, %" PRIu64 " packets", row->totals.bytes_out, row->totals.packets_out);
             snprintf(content[count++], 320, "First seen: %s", first);
@@ -608,7 +617,7 @@ void tui_screen_draw(const struct tui_snapshot *snapshot, const struct tui_optio
          state->paused ? "AUTO-REFRESH PAUSED" : "1s refresh", latest);
     text(1, 1, COLS - 2, 0, "App: %s | Search: %s | Proto: %s | IP: %s | DB: %s",
          options->application_selected ? (options->application[0] ? options->application : "unresolved") : "all",
-         options->search[0] ? options->search : "all", options->protocol == 6 ? "TCP" : options->protocol == 17 ? "UDP" : "any",
+         options->search[0] ? options->search : "all", options->protocol == 0 ? "any" : protocol_name(options->protocol),
          options->family == 4 ? "v4" : options->family == 6 ? "v6" : "any", path);
 
     const struct panel summary = { 2, 0, 6, COLS };
@@ -809,7 +818,8 @@ int tui_screen_key(int key, const struct tui_snapshot *snapshot,
             return TUI_KEY_REFRESH;
 
         case 'f':
-            options->protocol = options->protocol == 0 ? 6 : options->protocol == 6 ? 17 : 0;
+            options->protocol = options->protocol == 0 ? 6 : options->protocol == 6 ? 17 :
+                                options->protocol == 17 ? 1 : options->protocol == 1 ? 58 : 0;
 
             return TUI_KEY_REFRESH;
 

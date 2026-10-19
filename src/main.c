@@ -109,11 +109,19 @@ static void print_conversation(const struct flow_entry *entry, void *user) {
     ip_addr_str(&key->remote_ip, remote);
     snprintf(endpoint, sizeof endpoint, key->remote_ip.family == 6 ? "[%s]" : "%s", remote);
 
-    fprintf(stdout, "flow %s > %s:%u proto=%u packets_out=%" PRIu64
+    char peer[IP_ADDR_STR_LEN + 10];
+
+    if (protocol_has_ports(key->protocol)) {
+        snprintf(peer, sizeof peer, "%s:%u", endpoint, key->remote_port);
+    } else {
+        snprintf(peer, sizeof peer, "%s", endpoint);
+    }
+
+    fprintf(stdout, "flow %s > %s proto=%u packets_out=%" PRIu64
             " packets_in=%" PRIu64 " bytes_out=%" PRIu64 " bytes_in=%" PRIu64
             " first_seen=%" PRId64 " last_seen=%" PRId64 " name=%s app=",
-            ip_addr_str(&key->us_ip, local), endpoint,
-            key->remote_port, key->protocol, delta->packets_out, delta->packets_in,
+            ip_addr_str(&key->us_ip, local), peer,
+            key->protocol, delta->packets_out, delta->packets_in,
             delta->bytes_out, delta->bytes_in, delta->first_seen, delta->last_seen,
             row.remote_name[0] != '\0' ? row.remote_name : "-");
 

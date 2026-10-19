@@ -117,13 +117,17 @@ static int initialize_schema(struct store *store) {
         if (execute(store, STORE_MIGRATE_V2_SQL) == -1) {
             goto error;
         }
-    } else if (version != 3 && version != SCHEMA_VERSION) {
+    } else if (version != 3 && version != 4 && version != SCHEMA_VERSION) {
         snprintf(store->error, sizeof store->error,
                  "unsupported schema version %d (expected %d)", version, SCHEMA_VERSION);
         goto error;
     }
 
     if (version >= 1 && version <= 3 && execute(store, STORE_MIGRATE_V3_SQL) == -1) {
+        goto error;
+    }
+
+    if (version >= 1 && version <= 4 && execute(store, STORE_MIGRATE_V4_SQL) == -1) {
         goto error;
     }
 

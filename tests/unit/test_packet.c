@@ -52,7 +52,7 @@ static void test_layers_and_lengths(void) {
     CHECK(packet.ip.frag_offset == 8);
 
     frame[21] = 0;
-    frame[23] = IP_PROTO_ICMP;
+    frame[23] = 99; /* Unsupported upper-layer protocol. */
 
     CHECK(packet_parse(frame, 34, &packet) == 0);
     CHECK(packet.kind == PACKET_IPV4);

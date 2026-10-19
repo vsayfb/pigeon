@@ -3,13 +3,16 @@
 
 #include "proto/ethernet.h"
 #include "proto/transport.h"
+#include "proto/icmp.h"
 
 enum packet_kind {
     PACKET_ETHERNET,
     PACKET_IPV4,
     PACKET_IPV6,
     PACKET_TCP,
-    PACKET_UDP
+    PACKET_UDP,
+    PACKET_ICMP,
+    PACKET_ICMPV6
 };
 
 /* kind identifies the deepest decoded header; only that layer and its
@@ -22,6 +25,7 @@ struct packet_view {
     union {
         struct tcp_view tcp;
         struct udp_view udp;
+        struct icmp_view icmp;
     } transport;
 };
 

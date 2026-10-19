@@ -483,12 +483,47 @@ static void test_live_rates(void) {
     CHECK(unlink(path) == 0);
 }
 
+static void test_icmp_filters(void) {
+    char path[] = "/tmp/pigeon-tui-icmp-XXXXXX";
+    const int fd = mkstemp(path);
+    char error[TUI_ERROR_LEN];
+
+    CHECK(fd != -1 && close(fd) == 0);
+
+    struct store *store = store_open(path, error);
+    struct store_row rows[] = {
+        make_row("192.0.2.10", "198.51.100.42", 1, 4, 4, 100, 110, "ping.test"),
+        make_row("2001:db8::10", "2001:db8::42", 58, 4, 4, 100, 110, "ping6.test")
+    };
+
+    rows[0].key.remote_port = rows[1].key.remote_port = 0;
+    CHECK(store != NULL && store_flush(store, rows, 2) == 0);
+
+    struct tui_reader *reader = tui_reader_open(path, error);
+    struct tui_snapshot *snapshot = calloc(1, sizeof *snapshot);
+    struct tui_options options = { .recent_seconds = 30, .protocol = 1 };
+
+    CHECK(reader != NULL && snapshot != NULL);
+    CHECK(tui_reader_refresh(reader, &options, 110, 0, snapshot, error) == 0);
+    CHECK(snapshot->live_count == 1 && snapshot->top_count == 1);
+    CHECK(snapshot->live[0].key.protocol == 1 && snapshot->live[0].key.remote_port == 0);
+    options.protocol = 58;
+    CHECK(tui_reader_refresh(reader, &options, 111, 2, snapshot, error) == 0);
+    CHECK(snapshot->live_count == 1 && snapshot->top[0].key.protocol == 58);
+
+    free(snapshot);
+    tui_reader_close(reader);
+    store_close(store);
+    CHECK(unlink(path) == 0);
+}
+
 int main(void) {
     test_snapshot_queries_and_refresh();
     test_reader_never_creates_or_migrates();
     test_application_rows_and_search();
     test_application_aggregates_and_selection();
     test_live_rates();
+    test_icmp_filters();
 
     puts("tui_model: ok");
 

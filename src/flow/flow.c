@@ -157,7 +157,18 @@ void flow_destroy(struct flow *flow) {
 }
 
 int flow_observe(struct flow *flow, const struct packet_view *packet, int64_t now) {
-    if (packet->kind != PACKET_TCP && packet->kind != PACKET_UDP) {
+    const int icmp = packet->kind == PACKET_ICMP || packet->kind == PACKET_ICMPV6;
+
+    if (packet->kind != PACKET_TCP && packet->kind != PACKET_UDP && !icmp) {
+        return 0;
+    }
+
+    const uint8_t type = icmp ? packet->transport.icmp.type : 0;
+
+    /* Neighbor/router discovery and multicast-listener maintenance are local
+     * control traffic, rather than peers observed through diagnostics/errors. */
+    if ((packet->kind == PACKET_ICMPV6 && ((type >= 130 && type <= 137) || type == 143)) ||
+        (packet->kind == PACKET_ICMP && (type == 9 || type == 10))) {
         return 0;
     }
 
@@ -175,13 +186,13 @@ int flow_observe(struct flow *flow, const struct packet_view *packet, int64_t no
         return 0;
     }
 
-    uint16_t source_port;
-    uint16_t destination_port;
+    uint16_t source_port = 0;
+    uint16_t destination_port = 0;
 
     if (packet->kind == PACKET_TCP) {
         source_port = packet->transport.tcp.src_port;
         destination_port = packet->transport.tcp.dst_port;
-    } else {
+    } else if (packet->kind == PACKET_UDP) {
         source_port = packet->transport.udp.src_port;
         destination_port = packet->transport.udp.dst_port;
     }
@@ -193,7 +204,7 @@ int flow_observe(struct flow *flow, const struct packet_view *packet, int64_t no
         .protocol = packet_protocol(packet)
     };
 
-    if (flow->resolve_application != NULL) {
+    if (!icmp && flow->resolve_application != NULL) {
         flow->resolve_application(&key, outgoing ? source_port : destination_port,
                                   key.application, flow->application_user);
         key.application[FLOW_APP_LEN - 1] = '\0';
@@ -217,7 +228,8 @@ int flow_observe(struct flow *flow, const struct packet_view *packet, int64_t no
 
     const size_t payload = packet->kind == PACKET_TCP
                            ? packet->transport.tcp.payload_wire_len
-                           : packet->transport.udp.payload_wire_len;
+                           : packet->kind == PACKET_UDP ? packet->transport.udp.payload_wire_len
+                                                       : packet->transport.icmp.payload_wire_len;
 
     if (outgoing) {
         delta.packets_out++;
@@ -369,7 +381,7 @@ int flow_tick(struct flow *flow, int64_t now) {
         const struct flow_entry *next = flow_entry_newer(entry);
         const struct flow_delta *delta = flow_entry_delta(entry);
         const struct flow_key *key = flow_entry_key(entry);
-        const uint64_t idle = key->protocol == IP_PROTO_UDP ? 30 : 120;
+        const uint64_t idle = key->protocol == IP_PROTO_TCP ? 120 : 30;
 
         if (now >= delta->last_seen &&
             (uint64_t)now - (uint64_t)delta->last_seen >= idle) {

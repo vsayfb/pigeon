@@ -55,6 +55,17 @@ int packet_parse(const uint8_t *frame, const size_t len, struct packet_view *out
         }
 
         packet.kind = PACKET_UDP;
+    } else if ((!ipv6 && protocol == IP_PROTO_ICMP) || (ipv6 && protocol == IP_PROTO_ICMPV6)) {
+        const uint8_t *payload = ipv6 ? packet.ip6.payload : packet.ip.payload;
+        const size_t captured = ipv6 ? packet.ip6.payload_len : packet.ip.payload_len;
+        const size_t wire = ipv6 ? packet.ip6.payload_wire_len
+                                 : (size_t)packet.ip.total_len - packet.ip.header_len;
+
+        if (icmp_parse(payload, captured, wire, ipv6, &packet.transport.icmp) == -1) {
+            return -1;
+        }
+
+        packet.kind = ipv6 ? PACKET_ICMPV6 : PACKET_ICMP;
     }
 
     *out = packet;

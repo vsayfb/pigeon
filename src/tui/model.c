@@ -112,12 +112,12 @@ struct tui_reader *tui_reader_open(const char *path, char error[TUI_ERROR_LEN]) 
     }
 
     const int valid_version = sqlite3_step(version) == SQLITE_ROW &&
-                              sqlite3_column_int(version, 0) == 4;
+                              (sqlite3_column_int(version, 0) == 4 || sqlite3_column_int(version, 0) == 5);
 
     sqlite3_finalize(version);
 
     if (!valid_version) {
-        snprintf(error, TUI_ERROR_LEN, "schema version 4 required; run pigeon to create or migrate it");
+        snprintf(error, TUI_ERROR_LEN, "schema version 4 or 5 required; run pigeon to create or migrate it");
         goto error;
     }
 
@@ -400,7 +400,8 @@ int tui_reader_refresh(struct tui_reader *reader, const struct tui_options *opti
                         int64_t now, double monotonic_seconds, struct tui_snapshot *out,
                         char error[TUI_ERROR_LEN]) {
     if (options->recent_seconds < 0 ||
-        (options->protocol != 0 && options->protocol != 6 && options->protocol != 17) ||
+        (options->protocol != 0 && options->protocol != 6 && options->protocol != 17 &&
+         options->protocol != 1 && options->protocol != 58) ||
         (options->family != 0 && options->family != 4 && options->family != 6) ||
         options->sort < TUI_SORT_TOTAL || options->sort > TUI_SORT_UPLOAD ||
         options->live_sort < TUI_LIVE_RECENCY || options->live_sort > TUI_LIVE_UPLOAD ||

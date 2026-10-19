@@ -32,17 +32,17 @@ Other platforms report ENOSYS for discovery.
 Omit `--verbose` to disable packet output; startup,
 errors and the final packet count still go to stderr.
 
-Ethernet, IPv4, IPv6, TCP and UDP parsing is separate from printing. Unsupported
+Ethernet, IPv4, IPv6, TCP, UDP, ICMP and ICMPv6 parsing is separate from printing. Unsupported
 protocols and later IP fragments retain only their decoded enclosing headers.
 Malformed or truncated supported headers are reported in verbose mode.
 
-Flow tracking is connected to live capture and SQLite. Each parsed TCP/UDP
+Flow tracking is connected to live capture and SQLite. Each supported
 packet updates its remote conversation using capture timestamps. Live capture
 writes to `pigeon.db` in the current directory; select a different path with
 `--db <path>`.
 
 Pending deltas flush in one transaction at most once per second during periodic
-maintenance. UDP conversations expire after 30 idle seconds and TCP after 120.
+maintenance. UDP and ICMP conversations expire after 30 idle seconds and TCP after 120.
 Capacity eviction writes the oldest conversation before freeing it. Shutdown
 forces a final flush, including on SIGINT and SIGTERM. Forced shutdown and
 capacity flushes bypass the periodic throttle. Successful writes clear only
@@ -119,7 +119,7 @@ sudo ./build/pigeon --db /tmp/pigeon.db
 ```
 
 The viewer needs read access to the database and its SQLite sidecar files. It
-opens an existing schema-version-4 database read-only, never creates or migrates
+opens an existing schema-version-4 or -5 database read-only, never creates or migrates
 it, and does not require capture privileges. Quitting the viewer leaves capture
 running. `--once` prints a snapshot without requiring an interactive terminal.
 
@@ -223,7 +223,7 @@ and SQLite. Saved mappings reload at startup and expire according to the minimum
 CNAME/A TTL. Flows look up names on observation and at flush; a late reply can
 name an already flushed conversation without adding its counters again.
 Verbose conversation summaries include `name=...` (`name=-` when unknown).
-Existing schema-version-1/2/3 databases migrate transactionally to version 4.
+Existing schema-version-1/2/3/4 databases migrate transactionally to version 5.
 
 The cache keeps the last observed name for a shared IP; stored conversations
 retain their first assigned name. Plaintext UDP/53 A and AAAA responses are learned over IPv4 or IPv6;
@@ -268,3 +268,41 @@ Replay supports repeated `--local-ip` options for both address families:
 This fixture includes AAAA naming, extension headers, TCP/UDP traffic in both
 directions, and a truncated TCP payload. Regenerate it with
 `python3 tests/fixtures/make_ipv6.py`.
+
+## ICMP peer observations
+
+ICMP (IPv4 protocol 1) and ICMPv6 (IPv6 protocol 58) now record remote peers,
+including echo requests/replies and router-generated error messages. An ICMP
+exchange is an observation, not an established connection. Error messages are
+counted against the outer sender, not the destination embedded in a quoted
+packet. They are not attributed to TCP/UDP applications.
+
+ICMP has no ports. Rows use `remote_port=0` as a storage sentinel and an empty
+application, grouping all message types for a local/remote pair and protocol.
+The TUI/GUI display the protocol and omit the port. The `f` protocol filter in
+the TUI cycles through any, TCP, UDP, ICMP and ICMPv6.
+
+ICMPv6 neighbor/router discovery (types 133–137), multicast listener control
+(types 130–132 and 143), and IPv4 router discovery (types 9/10) remain excluded
+as local-link control traffic. This is not a general LAN-address filter: ping
+traffic to another LAN device is still an observation. Packets between two
+known addresses of this device remain ignored. Later fragments are not
+reassembled; checksums are not verified, as with existing protocol parsers.
+
+Payload byte counts exclude Ethernet/IP and the decoded ICMP header: eight
+bytes for IPv4 and IPv6 echo/errors, four for other ICMPv6 message types. Error
+payloads include the quoted packet; these totals represent control traffic,
+not application data. Type/code appear in verbose dumps, not in persisted keys.
+
+The collector migrates schema v4 to v5 transactionally on its next start,
+preserving existing observations and DNS data. Both updated viewers accept v4
+and v5; older GUI binaries need rebuilding before reading v5.
+
+Replay both families without capture privileges:
+
+```sh
+./build/pigeon --verbose --local-ip 192.0.2.10 --local-ip 2001:db8::10 \
+  -r tests/fixtures/icmp_conversations.pcap
+```
+
+Regenerate the fixture with `python3 tests/fixtures/make_icmp.py`.

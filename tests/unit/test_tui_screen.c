@@ -246,6 +246,21 @@ int main(void) {
     CHECK(contains("Up/s"));
     CHECK(contains("--"));
     CHECK(contains("v6.test -> [2001:db8::42]:443/tcp"));
+    snapshot->live[0].key.protocol = 58;
+    snapshot->live[0].key.remote_port = 0;
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK(columns_contain(0, 90, "/icmpv6"));
+    CHECK(!columns_contain(0, 90, ":0/"));
+    options.protocol = 17;
+    CHECK(tui_screen_key('f', snapshot, &options, &state) == TUI_KEY_REFRESH);
+    CHECK(options.protocol == 1);
+    tui_screen_key('f', snapshot, &options, &state);
+    CHECK(options.protocol == 58);
+    tui_screen_key('f', snapshot, &options, &state);
+    CHECK(options.protocol == 0);
+    snapshot->live[0].key.protocol = 6;
+    snapshot->live[0].key.remote_port = 443;
+
     CHECK(contains("5s | 0..1.0 KiB/s"));
     CHECK(contains("@_"));
     CHECK(contains("_="));
