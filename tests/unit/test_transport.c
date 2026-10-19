@@ -108,6 +108,7 @@ static void test_tcp_data_offset_below_5_is_rejected(void) {
 
     for (unsigned off = 0; off < 5; off++) {
         pkt[20 + 12] = (uint8_t)(off << 4);
+
         CHECK(tcp_parse(&ip, &tcp) == -1);
     }
 }
@@ -150,6 +151,7 @@ static void test_tcp_padding_is_not_payload(void) {
 
     /* Pure ACK: 40-byte IP packet followed by 6 bytes of padding. */
     parse_ip(pkt, len + 6, &ip);
+
     CHECK(tcp_parse(&ip, &tcp) == 0);
     CHECK(tcp.payload_len == 0);
     CHECK(tcp.payload_wire_len == 0);
@@ -157,6 +159,7 @@ static void test_tcp_padding_is_not_payload(void) {
     memset(pkt, 0, sizeof pkt);
     len = build_tcp(pkt, 20, 1);        /* 1 payload byte, 5 bytes of padding */
     parse_ip(pkt, len + 5, &ip);
+
     CHECK(tcp_parse(&ip, &tcp) == 0);
     CHECK(tcp.payload_len == 1);
     CHECK(tcp.payload_wire_len == 1);
@@ -183,11 +186,13 @@ static void test_tcp_later_fragment_is_rejected(void) {
 
     pkt[6] = 0x20;                              /* MF, offset 0: first fragment */
     parse_ip(pkt, len, &ip);
+
     CHECK(tcp_parse(&ip, &tcp) == 0);
 
     pkt[6] = 0x00;                              /* offset 185 * 8: later fragment */
     pkt[7] = 0xB9;
     parse_ip(pkt, len, &ip);
+
     CHECK(ip.frag_offset == 1480);
     CHECK(tcp_parse(&ip, &tcp) == -1);
 }
@@ -247,6 +252,7 @@ static void test_udp_length_below_header_is_rejected(void) {
         const size_t len = build_udp(pkt, udp_len, 4);
 
         parse_ip(pkt, len, &ip);
+
         CHECK(udp_parse(&ip, &udp) == -1);
     }
 }
@@ -260,6 +266,7 @@ static void test_udp_every_truncation_is_rejected(void) {
 
     for (size_t k = 0; k < UDP_HEADER_LEN; k++) {
         parse_ip(pkt, IPV4_MIN_HEADER_LEN + k, &ip);
+
         CHECK(udp_parse(&ip, &udp) == -1);
     }
 }

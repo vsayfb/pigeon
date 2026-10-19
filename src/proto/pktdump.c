@@ -16,8 +16,10 @@ void pktdump(FILE *stream, const struct packet_view *packet) {
     }
 
     const struct ipv4_view *ip = &packet->ip;
+
     char src[IPV4_STR_LEN];
     char dst[IPV4_STR_LEN];
+
     fprintf(stream, "    IPv4 %s > %s proto=%u hdr=%u total=%u payload=%zu\n",
             ipv4_addr_str(ip->src, src), ipv4_addr_str(ip->dst, dst),
             ip->protocol, ip->header_len, ip->total_len, ip->payload_len);
@@ -27,10 +29,12 @@ void pktdump(FILE *stream, const struct packet_view *packet) {
                 ip->frag_offset);
     } else if (packet->kind == PACKET_TCP) {
         const struct tcp_view *tcp = &packet->transport.tcp;
+
         fprintf(stream, "    TCP %u > %u hdr=%u payload=%zu\n",
                 tcp->src_port, tcp->dst_port, tcp->header_len, tcp->payload_wire_len);
     } else if (packet->kind == PACKET_UDP) {
         const struct udp_view *udp = &packet->transport.udp;
+
         fprintf(stream, "    UDP %u > %u payload=%zu\n",
                 udp->src_port, udp->dst_port, udp->payload_wire_len);
     }

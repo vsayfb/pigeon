@@ -9,6 +9,7 @@
 
 struct recorded {
     unsigned count;
+
     uint32_t caplen[MAX_PACKETS];
     uint32_t wirelen[MAX_PACKETS];
     int is_ipv4[MAX_PACKETS];
@@ -58,12 +59,15 @@ static void test_non_ethernet_link_type_fails(void) {
         0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
         0xff, 0xff, 0x00, 0x00, 0x65, 0x00, 0x00, 0x00,
     };
+
     char path[] = "/tmp/pigeon_linktype_XXXXXX";
     struct recorded r = { 0 };
 
     const int fd = mkstemp(path);
+
     CHECK(fd != -1);
     CHECK(write(fd, header, sizeof header) == (ssize_t)sizeof header);
+
     close(fd);
 
     CHECK(capture_run_file(path, record, &r) == -1);

@@ -19,3 +19,15 @@ execute_process(COMMAND "${PIGEON}" --unknown
 if(NOT rc EQUAL 2 OR NOT errors MATCHES "usage:")
     message(FATAL_ERROR "Invalid arguments did not print usage")
 endif()
+
+execute_process(COMMAND "${PIGEON}" -r
+    RESULT_VARIABLE rc OUTPUT_VARIABLE output ERROR_VARIABLE errors)
+if(NOT rc EQUAL 2 OR NOT errors MATCHES "usage:")
+    message(FATAL_ERROR "Missing replay path did not print usage")
+endif()
+
+execute_process(COMMAND "${PIGEON}" pigeon-missing-interface
+    RESULT_VARIABLE rc OUTPUT_VARIABLE output ERROR_VARIABLE errors)
+if(NOT rc EQUAL 1 OR NOT errors MATCHES "interface discovery")
+    message(FATAL_ERROR "Invalid interface did not fail discovery: ${errors}")
+endif()

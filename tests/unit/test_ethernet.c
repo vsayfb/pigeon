@@ -15,6 +15,7 @@ static void test_parses_header_fields(void) {
         0x08, 0x00,                             /* ethertype */
         0xde, 0xad, 0xbe, 0xef,                 /* payload */
     };
+
     struct eth_view eth;
 
     CHECK(eth_parse(frame, sizeof frame, &eth) == 0);
@@ -48,11 +49,13 @@ static void test_ethertypes_are_decoded(void) {
 
     frame[12] = 0x86;
     frame[13] = 0xDD;
+
     CHECK(eth_parse(frame, sizeof frame, &eth) == 0);
     CHECK(eth.ethertype == ETHERTYPE_IPV6);
 
     frame[12] = 0x08;
     frame[13] = 0x06;
+
     CHECK(eth_parse(frame, sizeof frame, &eth) == 0);
     CHECK(eth.ethertype == ETHERTYPE_ARP);
 }

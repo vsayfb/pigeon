@@ -17,8 +17,17 @@ Replay a fixture with packet details:
 ./build/pigeon --verbose -r tests/fixtures/short_frames.pcap
 ```
 
-Capture live traffic with `./build/pigeon --verbose <interface>` (requires
-capture privileges). Omit `--verbose` to disable packet output; startup,
+Live capture is currently Linux only and requires capture privileges.
+Run `./build/pigeon --verbose` to select the interface, local IPv4 address
+and gateway from the kernel route to `1.1.1.1`. This lookup sends no traffic.
+Use `./build/pigeon --verbose <interface>` to constrain that route lookup to
+a named interface. Discovery fails if that interface has no usable route.
+Startup reports the selected address and gateway (zero for a direct route).
+
+Discovery happens once at startup; address and route changes are not tracked.
+Offline replay skips discovery. Other platforms report ENOSYS for discovery.
+
+Omit `--verbose` to disable packet output; startup,
 errors and the final packet count still go to stderr.
 
 Ethernet, IPv4, TCP and UDP parsing is separate from printing. Unsupported

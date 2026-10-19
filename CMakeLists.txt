@@ -70,3 +70,16 @@ add_test(NAME cli COMMAND ${CMAKE_COMMAND}
         -DPIGEON=$<TARGET_FILE:pigeon>
         -DFIXTURE=${CMAKE_SOURCE_DIR}/tests/fixtures/short_frames.pcap
         -P ${CMAKE_SOURCE_DIR}/tests/integration/test_cli.cmake)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_sources(pigeon_core PRIVATE src/net/netif_linux.c)
+
+    add_executable(test_netif tests/unit/test_netif.c)
+    target_link_libraries(test_netif PRIVATE pigeon_core)
+    add_test(NAME netif COMMAND test_netif)
+else()
+    target_sources(pigeon_core PRIVATE src/net/netif_stub.c)
+endif()
+
+add_executable(test_netif_stub tests/unit/test_netif_stub.c src/net/netif_stub.c)
+add_test(NAME netif_stub COMMAND test_netif_stub)

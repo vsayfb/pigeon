@@ -74,6 +74,7 @@ static void test_ihl_below_5_is_rejected(void) {
 
     for (unsigned ihl = 0; ihl < 5; ihl++) {
         pkt[0] = (uint8_t)(0x40 | ihl);
+
         CHECK(ipv4_parse(pkt, sizeof pkt, &ip) == -1);
     }
 }
@@ -90,6 +91,7 @@ static void test_version_other_than_4_is_rejected(void) {
         }
 
         pkt[0] = (uint8_t)((version << 4) | 5);
+
         CHECK(ipv4_parse(pkt, sizeof pkt, &ip) == -1);
     }
 }
@@ -164,6 +166,7 @@ static void test_fragment_offset_is_decoded(void) {
 
     pkt[6] = 0x40;                          /* DF flag, offset 0 */
     pkt[7] = 0x00;
+
     CHECK(ipv4_parse(pkt, sizeof pkt, &ip) == 0);
     CHECK(ip.frag_offset == 0);
 
@@ -173,11 +176,13 @@ static void test_fragment_offset_is_decoded(void) {
 
     pkt[6] = 0x00;                          /* no flags, offset 185 * 8 */
     pkt[7] = 0xB9;
+
     CHECK(ipv4_parse(pkt, sizeof pkt, &ip) == 0);
     CHECK(ip.frag_offset == 1480);
 
     pkt[6] = 0x3F;                          /* MF + largest offset, 8191 * 8 */
     pkt[7] = 0xFF;
+
     CHECK(ipv4_parse(pkt, sizeof pkt, &ip) == 0);
     CHECK(ip.frag_offset == 65528);
 }
