@@ -254,10 +254,13 @@ static void conversation_panel(struct panel p, const struct tui_snapshot *snapsh
     char title[100];
 
     if (live) {
+        const char *live_sorts[] = { "recency", "total/s", "down/s", "up/s" };
+
         if (options->recent_seconds == 0) {
-            snprintf(title, sizeof title, "Live traffic | all recorded by recency");
+            snprintf(title, sizeof title, "Live traffic | all recorded | %s", live_sorts[options->live_sort]);
         } else {
-            snprintf(title, sizeof title, "Live traffic | last %ds", options->recent_seconds);
+            snprintf(title, sizeof title, "Live traffic | last %ds | %s", options->recent_seconds,
+                     live_sorts[options->live_sort]);
         }
     } else {
         snprintf(title, sizeof title, "Top Conversations | all recorded | %s", sorts[options->sort]);
@@ -330,7 +333,7 @@ static void conversation_panel(struct panel p, const struct tui_snapshot *snapsh
     }
 
     text(p.y + p.height - 2, p.x + 2, p.width - 4, A_DIM,
-         live ? "%zu shown (limit %d) | DB rates; -- waiting | Enter: details"
+         live ? "%zu newest matches (max %d) | -- waiting | Enter: details"
               : "%zu shown (limit %d) | Enter: details", count, TUI_MAX_ROWS);
 }
 
@@ -446,7 +449,7 @@ static void modal(const struct tui_snapshot *snapshot, const struct tui_screen *
         const char *lines[] = {
             "Tab / Shift-Tab  Change focused panel", "Up/Down, j/k     Select row; PgUp/PgDn, Home/End also work",
             "Enter           Details; on Applications: filter conversations", "/               Search name, remote IP, or application (conversations)",
-            "s               Sort conversations and applications: total/down/up", "r               Live window: 10s / 30s / 120s / all",
+            "s: cumulative sort | l: live recency/total/down/up", "r               Live window: 10s / 30s / 120s / all",
             "f               Conversation protocol: any / TCP / UDP", "v               Address family: any / IPv4 / IPv6",
             "p               Pause auto-refresh; collector keeps running", "q / Ctrl-C      Quit viewer; collector keeps running",
             "Rates are database counter deltas, not NIC speed.", "Totals count transport payload, including retransmissions.",
@@ -592,7 +595,7 @@ void tui_screen_draw(const struct tui_snapshot *snapshot, const struct tui_optio
          "%s", error[0] ? error : state->focus == 2
          ? "Tab panel | arrows select | Enter filter app | / search | s sort | p pause"
          : "Tab panel | arrows select | Enter details | / search | s sort | r recent | f/v filters | p pause");
-    text(LINES - 1, 1, COLS - 2, A_DIM, "a all apps | d details | ? help | q quit | Lists show up to 200 matches");
+    text(LINES - 1, 1, COLS - 2, A_DIM, "l live sort | a all apps | d details | ? help | q quit | Lists show up to 200 matches");
 
     if (state->details || state->help) {
         modal(snapshot, state);
@@ -748,6 +751,11 @@ int tui_screen_key(int key, const struct tui_snapshot *snapshot,
 
         case 's':
             options->sort = (options->sort + 1) % 3;
+
+            return TUI_KEY_REFRESH;
+
+        case 'l':
+            options->live_sort = (options->live_sort + 1) % 4;
 
             return TUI_KEY_REFRESH;
 

@@ -10,6 +10,7 @@
 #define TUI_SEARCH_LEN 128
 
 enum tui_sort { TUI_SORT_TOTAL, TUI_SORT_DOWNLOAD, TUI_SORT_UPLOAD };
+enum tui_live_sort { TUI_LIVE_RECENCY, TUI_LIVE_TOTAL, TUI_LIVE_DOWNLOAD, TUI_LIVE_UPLOAD };
 
 struct tui_options {
     char search[TUI_SEARCH_LEN];
@@ -17,6 +18,7 @@ struct tui_options {
     int family;                /* 0, 4 or 6 */
     int recent_seconds;        /* zero means all recorded */
     enum tui_sort sort;
+    enum tui_live_sort live_sort;
     int application_selected;  /* distinguishes all apps from unresolved (empty name) */
     char application[FLOW_APP_LEN];
 };
@@ -98,6 +100,8 @@ void tui_reader_close(struct tui_reader *reader);
  * Live row rates retain per-key baselines while a row remains visible; newly
  * visible rows wait for a second sample. Counter resets invalidate the rate.
  * Subsecond refreshes retain the last estimate without moving its baseline.
+ * Live sorting ranks these 200 most recent matches after rates are sampled.
+ * Measured rates precede waiting rows; ties keep the query's recency/key order.
  * Returns 0 on success or -1 with error set, leaving out and rate history
  * unchanged. No returned data borrows SQLite memory. */
 int tui_reader_refresh(struct tui_reader *reader, const struct tui_options *options,

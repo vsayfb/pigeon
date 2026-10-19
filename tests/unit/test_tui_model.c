@@ -346,7 +346,7 @@ static void test_live_rates(void) {
     struct store *store = store_open(path, error);
     struct store_row rows[] = {
         make_row("192.0.2.10", "198.51.100.1", 6, 100, 10, 950, 995, "alpha.test"),
-        make_row("192.0.2.10", "198.51.100.1", 6, 200, 20, 950, 995, "alpha.test"),
+        make_row("192.0.2.10", "198.51.100.1", 6, 200, 200, 950, 995, "alpha.test"),
         make_row("2001:db8::10", "2001:db8::42", 17, 300, 30, 950, 995, "v6.test")
     };
 
@@ -377,6 +377,32 @@ static void test_live_rates(void) {
     CHECK(live_row(snapshot, "chromium", 4)->rate_down == 100);
     CHECK(live_row(snapshot, "firefox", 6)->rate_down == 150);
 
+    options.live_sort = TUI_LIVE_DOWNLOAD;
+    CHECK(tui_reader_refresh(reader, &options, 1002, 12.01, snapshot, error) == 0);
+    CHECK(snapshot->live[0].key.us_ip.family == 6);
+    CHECK(snapshot->live[0].rate_down == 150);
+    CHECK(strcmp(snapshot->live[1].key.application, "chromium") == 0);
+
+    options.live_sort = TUI_LIVE_UPLOAD;
+    CHECK(tui_reader_refresh(reader, &options, 1002, 12.02, snapshot, error) == 0);
+    CHECK(strcmp(snapshot->live[0].key.application, "chromium") == 0);
+    CHECK(snapshot->live[0].rate_up == 100);
+    CHECK(snapshot->live[1].key.us_ip.family == 6);
+
+    options.live_sort = TUI_LIVE_TOTAL;
+    CHECK(tui_reader_refresh(reader, &options, 1002, 12.03, snapshot, error) == 0);
+    CHECK(strcmp(snapshot->live[0].key.application, "chromium") == 0);
+    CHECK(snapshot->live[1].key.us_ip.family == 6);
+    CHECK(snapshot->live[2].key.us_ip.family == 4);
+    CHECK(strcmp(snapshot->top[0].key.application, "chromium") == 0);
+
+    options.live_sort = TUI_LIVE_RECENCY;
+    CHECK(tui_reader_refresh(reader, &options, 1002, 12.04, snapshot, error) == 0);
+    CHECK(strcmp(snapshot->live[0].key.application, "firefox") == 0);
+    CHECK(snapshot->live[0].key.us_ip.family == 4);
+
+    options.live_sort = TUI_LIVE_DOWNLOAD;
+
     rows[0].delta.bytes_in = 50;
     rows[0].delta.bytes_out = 5;
     CHECK(store_flush(store, rows, 1) == 0);
@@ -402,6 +428,8 @@ static void test_live_rates(void) {
     options.application_selected = 0;
     CHECK(tui_reader_refresh(reader, &options, 1002, 16, snapshot, error) == 0);
     CHECK(live_row(snapshot, "firefox", 4)->rates_valid == 0);
+    CHECK(strcmp(snapshot->live[0].key.application, "chromium") == 0);
+    CHECK(snapshot->live[0].rates_valid == 1 && snapshot->live[0].rate_down == 0);
 
     sqlite3 *db = NULL;
 
@@ -413,6 +441,8 @@ static void test_live_rates(void) {
     CHECK(tui_reader_refresh(reader, &options, 1002, 17.2, snapshot, error) == 0);
     CHECK(live_row(snapshot, "firefox", 4)->rates_valid == 1);
     CHECK(live_row(snapshot, "firefox", 4)->rate_down == 0);
+    CHECK(strcmp(snapshot->live[0].key.application, "firefox") == 0);
+    CHECK(snapshot->live[0].key.us_ip.family == 4);
 
     CHECK(sqlite3_exec(db, "UPDATE conversations SET bytes_in=9007199254740992,bytes_out=9007199254740992"
                       " WHERE application='firefox' AND length(us_ip)=4", NULL, NULL, NULL) == SQLITE_OK);
@@ -441,6 +471,10 @@ static void test_live_rates(void) {
     options.recent_seconds = 0;
     CHECK(tui_reader_refresh(reader, &options, 1100, 121, snapshot, error) == 0);
     CHECK(live_row(snapshot, "firefox", 4)->rates_valid == 0);
+
+    options.live_sort = (enum tui_live_sort)99;
+    CHECK(tui_reader_refresh(reader, &options, 1100, 122, snapshot, error) == -1);
+    CHECK(snapshot->live_count == 3);
 
     CHECK(sqlite3_close(db) == SQLITE_OK);
     free(snapshot);

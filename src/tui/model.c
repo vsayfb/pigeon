@@ -351,6 +351,51 @@ static void update_live_rates(struct tui_reader *reader, struct tui_snapshot *sn
     reader->live_refreshed_at = now;
 }
 
+static double live_rate(const struct tui_conversation *row, enum tui_live_sort sort) {
+    if (sort == TUI_LIVE_DOWNLOAD) {
+        return row->rate_down;
+    }
+
+    if (sort == TUI_LIVE_UPLOAD) {
+        return row->rate_up;
+    }
+
+    return row->rate_down + row->rate_up;
+}
+
+static int live_precedes(const struct tui_conversation *a, const struct tui_conversation *b,
+                          enum tui_live_sort sort) {
+    if (a->rates_valid != b->rates_valid) {
+        return a->rates_valid > b->rates_valid;
+    }
+
+    if (!a->rates_valid) {
+        return 0;
+    }
+
+    return live_rate(a, sort) > live_rate(b, sort);
+}
+
+static void sort_live(struct tui_snapshot *snapshot, enum tui_live_sort sort) {
+    if (sort == TUI_LIVE_RECENCY) {
+        return;
+    }
+
+    /* Stable insertion sort keeps recency and deterministic key order for
+     * equal rates. This list is bounded to 200 rows; baselines stay keyed. */
+    for (size_t i = 1; i < snapshot->live_count; i++) {
+        const struct tui_conversation row = snapshot->live[i];
+        size_t position = i;
+
+        while (position > 0 && live_precedes(&row, &snapshot->live[position - 1], sort)) {
+            snapshot->live[position] = snapshot->live[position - 1];
+            position--;
+        }
+
+        snapshot->live[position] = row;
+    }
+}
+
 int tui_reader_refresh(struct tui_reader *reader, const struct tui_options *options,
                         int64_t now, double monotonic_seconds, struct tui_snapshot *out,
                         char error[TUI_ERROR_LEN]) {
@@ -358,6 +403,7 @@ int tui_reader_refresh(struct tui_reader *reader, const struct tui_options *opti
         (options->protocol != 0 && options->protocol != 6 && options->protocol != 17) ||
         (options->family != 0 && options->family != 4 && options->family != 6) ||
         options->sort < TUI_SORT_TOTAL || options->sort > TUI_SORT_UPLOAD ||
+        options->live_sort < TUI_LIVE_RECENCY || options->live_sort > TUI_LIVE_UPLOAD ||
         memchr(options->search, '\0', sizeof options->search) == NULL ||
         (options->application_selected != 0 && options->application_selected != 1) ||
         memchr(options->application, '\0', sizeof options->application) == NULL ||
@@ -480,6 +526,7 @@ int tui_reader_refresh(struct tui_reader *reader, const struct tui_options *opti
     }
 
     update_live_rates(reader, snapshot, monotonic_seconds);
+    sort_live(snapshot, options->live_sort);
 
     snapshot->rate_down = reader->rate_down;
     snapshot->rate_up = reader->rate_up;

@@ -155,6 +155,17 @@ int main(void) {
     }
 
     state.focus = 0;
+
+    const char *live_titles[] = { "total/s", "down/s", "up/s", "recency" };
+
+    for (int i = 0; i < 4; i++) {
+        CHECK(tui_screen_key('l', snapshot, &options, &state) == TUI_KEY_REFRESH);
+        tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+        CHECK(contains(live_titles[i]));
+        CHECK(options.sort == TUI_SORT_TOTAL);
+    }
+
+    CHECK(options.live_sort == TUI_LIVE_RECENCY);
     CHECK(tui_screen_key('\t', snapshot, &options, &state) == 0);
     CHECK(state.focus == 1);
     CHECK(tui_screen_key('s', snapshot, &options, &state) == TUI_KEY_REFRESH);
@@ -228,13 +239,20 @@ int main(void) {
     struct tui_snapshot *next = malloc(sizeof *next);
 
     CHECK(next != NULL);
+    snapshot->live_count = 2;
+    snapshot->live[1] = snapshot->live[0];
+    strcpy(snapshot->live[1].key.application, "chromium");
     *next = *snapshot;
+    next->live[0] = snapshot->live[1];
+    next->live[1] = snapshot->live[0];
+    state.selected[0] = 0;
     next->applications[0] = snapshot->applications[1];
     next->applications[1] = snapshot->applications[0];
     state.focus = 2;
     state.selected[2] = 0;
     tui_screen_reselect(snapshot, next, &state);
     CHECK(state.selected[2] == 1);
+    CHECK(state.selected[0] == 1);
 
     next->application_count = 0;
     tui_screen_reselect(snapshot, next, &state);

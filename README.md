@@ -139,6 +139,7 @@ fit at 110 columns by 26 rows. Lists show at most 200 matches.
 | / | Search recorded name, remote IP, or application; Enter applies |
 | Esc | Clear applied search and exact application filter |
 | s | Sort Top Conversations and Applications by total, download, or upload |
+| l | Sort Live traffic by recency, combined rate, download rate, or upload rate |
 | r | Cycle Live traffic window: 30s, 120s, all recorded, 10s |
 | f / v | Cycle protocol / address-family filters |
 | p | Pause automatic refresh |
@@ -155,8 +156,13 @@ counts and the latest observation time. Wide layouts place Applications and New
 endpoints side by side below the conversation lists.
 
 Live traffic shows estimated download/upload rates per conversation in `Down/s`
-and `Up/s`, ordered by last activity. Values are payload bytes per second in the
-shown unit. The endpoint label includes port/protocol; narrow panels hide the
+and `Up/s`, ordered by last activity by default. Press `l` to cycle recency,
+combined rate, download rate, and upload rate independently of the cumulative
+rankings controlled by `s`. Rate sorting is descending among the 200 most recent
+conversations matching the current filters/window. Measured rates (including
+zero) precede waiting rows; ties retain recency and deterministic key order.
+The panel title shows the active sort, and selection follows the conversation
+when rankings change. Values are payload bytes per second in the shown unit. The endpoint label includes port/protocol; narrow panels hide the
 Seen column, which remains available in details. Long domain names are
 abbreviated in the middle with `...` to preserve the IP, port, and protocol.
 If space is too limited for a useful name, the label shows only the endpoint;
