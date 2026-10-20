@@ -1,0 +1,118 @@
+name: Release and publish Pigeon
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pigeon-production-release
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check deployment preservation
+        run: python3 packaging/test_deploy.py
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^project(pigeon VERSION \([0-9.]*\) LANGUAGES C).*/\1/p' CMakeLists.txt)
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          if [[ "$GITHUB_REF_TYPE" == tag ]]; then
+            test "$GITHUB_REF_NAME" = "v$version"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+  core:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, ubuntu-24.04-arm]
+        libc: [glibc, musl]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build core and TUI release in baseline container
+        env:
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+          RELEASE_LIBC: ${{ matrix.libc }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$RELEASE_LIBC" == glibc ]]; then
+            image=ubuntu:22.04
+            dependencies='apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential cmake ninja-build libpcap-dev libsqlite3-dev libncursesw5-dev python3 patchelf file'
+          else
+            image=alpine:3.20
+            dependencies='apk add --no-cache build-base linux-headers cmake ninja libpcap-dev libpcap-doc sqlite-dev sqlite-doc ncurses-dev ncurses-doc ncurses-terminfo python3 patchelf file'
+          fi
+          docker run --rm -v "$PWD:/work" -w /work -e RELEASE_VERSION "$image" sh -ec \
+            "$dependencies; python3 packaging/release.py build --version \"\$RELEASE_VERSION\" --output dist"
+          # Installer smoke test in the same libc baseline, without installing dev libraries.
+          docker run --rm -v "$PWD:/work" -w /work -e RELEASE_VERSION "$image" sh -ec '
+            mkdir -p /tmp/site/releases/"$RELEASE_VERSION"
+            cp dist/*.manifest dist/*.part* /tmp/site/releases/"$RELEASE_VERSION"/
+            printf "%s\n" "$RELEASE_VERSION" > /tmp/site/latest.txt
+            HOME=/tmp/user sh packaging/install.sh --from /tmp/site
+            /tmp/user/.local/bin/pigeon --version
+            /tmp/user/.local/bin/pigeon-tui --help
+          '
+      - name: Verify installer failure and reinstall behavior
+        if: matrix.libc == 'glibc'
+        env:
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          python3 packaging/release.py site --version "$RELEASE_VERSION" --artifacts dist --output dist/site
+          python3 packaging/test_installer.py --site dist/site
+      - uses: actions/upload-artifact@v4
+        with:
+          name: core-${{ matrix.runner }}-${{ matrix.libc }}
+          path: |
+            dist/*.manifest
+            dist/*.part*
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: [version, core]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: downloaded
+      - name: Prepare CLI downloads
+        env:
+          RELEASE_VERSION: ${{ needs.version.outputs.version }}
+        run: python3 packaging/release.py site --complete --version "$RELEASE_VERSION" --artifacts downloaded --output dist/upload
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Ensure shared Pages project exists
+        id: pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: python3 packaging/ensure_pages.py
+      - name: Preserve GUI downloads and assemble the deployment
+        env:
+          PIGEON_FIRST_DEPLOYMENT: ${{ steps.pages.outputs.first_deployment }}
+        run: python3 packaging/assemble.py --source dist/upload --output dist/site
+      - name: Deploy CLI and preserved GUI files to Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: npx --yes wrangler@4 pages deploy dist/site --project-name=piigeon --branch=main

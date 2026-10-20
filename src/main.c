@@ -239,6 +239,12 @@ static void print_conversation(const struct flow_entry *entry, void *user) {
 }
 
 int main(const int argc, char **argv) {
+    if (argc == 2 && strcmp(argv[1], "--version") == 0) {
+        printf("pigeon %s\n", PIGEON_VERSION);
+
+        return 0;
+    }
+
     struct capture_context context = { 0 };
     const char *source = NULL;
     int offline = 0;

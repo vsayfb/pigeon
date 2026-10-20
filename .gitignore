@@ -5,3 +5,7 @@ cmake-build-*/
 *.db-wal
 *.db-shm
 *.db.control
+
+/release-build/
+/dist/
+/packaging/__pycache__/

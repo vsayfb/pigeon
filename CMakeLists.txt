@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(pigeon C)
+project(pigeon VERSION 0.0.1 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -46,7 +46,7 @@ add_library(pigeon_core STATIC
 target_link_libraries(pigeon_core PUBLIC ${PCAP_LIBRARY} SQLite::SQLite3 Threads::Threads)
 
 add_executable(pigeon src/main.c)
-target_compile_definitions(pigeon PRIVATE PIGEON_VERSION="0.0.1")
+target_compile_definitions(pigeon PRIVATE PIGEON_VERSION="${PROJECT_VERSION}")
 target_link_libraries(pigeon PRIVATE pigeon_core)
 
 enable_testing()
@@ -274,3 +274,6 @@ endif()
 add_executable(test_address_scope tests/unit/test_address_scope.c)
 target_link_libraries(test_address_scope PRIVATE pigeon_core)
 add_test(NAME address_scope COMMAND test_address_scope)
+
+include(GNUInstallDirs)
+install(TARGETS pigeon pigeon-tui RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

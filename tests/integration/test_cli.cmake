@@ -1,3 +1,9 @@
+execute_process(COMMAND "${PIGEON}" --version
+    RESULT_VARIABLE rc OUTPUT_VARIABLE output ERROR_VARIABLE errors)
+if(NOT rc EQUAL 0 OR NOT output MATCHES "^pigeon [0-9]+\\.[0-9]+\\.[0-9]+\n$" OR NOT errors STREQUAL "")
+    message(FATAL_ERROR "Version command failed: ${rc}: ${output} ${errors}")
+endif()
+
 execute_process(COMMAND "${PIGEON}" -r "${FIXTURE}"
     RESULT_VARIABLE rc OUTPUT_VARIABLE output ERROR_VARIABLE errors)
 if(NOT rc EQUAL 0 OR NOT output STREQUAL "" OR

@@ -493,3 +493,9 @@ always take precedence. Exact IP addresses remain visible. These labels are
 presentation-only address-range classifications, not DNS names or proof that
 a peer is on the current interface's subnet; private VPN networks can qualify.
 Details show the range classification. Neither SQLite nor packet tracking changes.
+
+## Installation releases
+
+The one-command installer and Cloudflare Pages release workflow are documented
+in [docs/INSTALLATION.md](docs/INSTALLATION.md). The collector and TUI are installed
+by `/cli/install.sh`; the optional GUI has its own installer and workflow in the GUI repository.
