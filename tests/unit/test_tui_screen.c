@@ -49,8 +49,8 @@ static void test_endpoint_abbreviations(void) {
     strcpy(snapshot->endpoints[0].name, long_name);
 
     tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
-    CHECK(columns_contain(0, 90, "Application"));
-    CHECK(columns_contain(0, 90, "unresolved"));
+    CHECK(columns_contain(0, 90, "Process"));
+    CHECK(!columns_contain(0, 90, "unresolved"));
     CHECK(columns_contain(0, 90, "173.194.10.38"));
     CHECK(columns_contain(90, 90, "173.194.10.38"));
     CHECK(columns_contain(0, 90, "..."));
@@ -361,7 +361,7 @@ int main(void) {
     CHECK(contains("Live traffic"));
     CHECK(contains("Top Conversations"));
     CHECK(contains("New endpoints"));
-    CHECK(contains("Applications | all recorded"));
+    CHECK(contains("Processes | all recorded"));
     CHECK(contains("firefox"));
     CHECK(contains("Down/s"));
     CHECK(contains("Up/s"));
@@ -409,13 +409,13 @@ int main(void) {
 
     CHECK(resizeterm(26, 110) == OK);
     tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
-    CHECK(contains("Applications | all recorded"));
+    CHECK(contains("Processes | all recorded"));
     CHECK(contains("New endpoints"));
 
     CHECK(resizeterm(24, 80) == OK);
 
     for (int focus = 0; focus < 4; focus++) {
-        const char *titles[] = { "Live traffic", "Top Conversations", "Applications", "New endpoints" };
+        const char *titles[] = { "Live traffic", "Top Conversations", "Processes", "New endpoints" };
 
         state.focus = focus;
         tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
@@ -450,7 +450,7 @@ int main(void) {
     tui_screen_key('\n', snapshot, &options, &state);
     tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
     CHECK(contains("2001:db8::42"));
-    CHECK(contains("Application: firefox"));
+    CHECK(contains("Process: firefox"));
     tui_screen_key(KEY_DOWN, snapshot, &options, &state);
     tui_screen_key(27, snapshot, &options, &state);
     CHECK(state.details == 0);
@@ -488,17 +488,17 @@ int main(void) {
     CHECK(tui_screen_key('\t', snapshot, &options, &state) == TUI_KEY_REFRESH);
     CHECK(state.focus == 2);
     tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
-    CHECK(contains("Applications | all recorded"));
+    CHECK(contains("Processes | all recorded"));
     CHECK(tui_screen_key('d', snapshot, &options, &state) == 0);
     CHECK(state.details == 1);
     tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
-    CHECK(contains("Application: firefox"));
+    CHECK(contains("Process: firefox"));
     tui_screen_key(27, snapshot, &options, &state);
     CHECK(tui_screen_key('\n', snapshot, &options, &state) == TUI_KEY_REFRESH);
     CHECK(options.application_selected == 1 && strcmp(options.application, "firefox") == 0);
     CHECK(state.focus == 1 && options.search[0] == '\0');
     tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
-    CHECK(contains("App: firefox"));
+    CHECK(contains("Process: firefox"));
 
     state.focus = 2;
     tui_screen_key(KEY_END, snapshot, &options, &state);

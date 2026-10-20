@@ -41,7 +41,7 @@ static void print_safe(const char *text) {
 static void print_row(const struct tui_conversation *row) {
     char remote[IP_ADDR_STR_LEN];
 
-    print_safe(row->key.application[0] ? row->key.application : "unresolved");
+    print_safe(row->key.application[0] ? row->key.application : "—");
     printf("  %s%s%s:%u %s down=%" PRIu64 " up=%" PRIu64 " name=",
            row->key.remote_ip.family == 6 ? "[" : "",
            ip_addr_str(&row->key.remote_ip, remote), row->key.remote_ip.family == 6 ? "]" : "",
@@ -67,12 +67,12 @@ static void print_snapshot(const struct tui_snapshot *snapshot) {
         print_row(&snapshot->top[i]);
     }
 
-    puts("Applications (all recorded; total traffic)");
+    puts("Processes (all recorded; total traffic)");
 
     for (size_t i = 0; i < snapshot->application_count; i++) {
         const struct tui_application *row = &snapshot->applications[i];
 
-        print_safe(row->name[0] ? row->name : "unresolved");
+        print_safe(row->name[0] ? row->name : "—");
         printf(" down=%.0f up=%.0f conversations=%" PRIu64 " remote_ips=%" PRIu64 "\n",
                row->bytes_down, row->bytes_up, row->conversations, row->remote_ips);
     }

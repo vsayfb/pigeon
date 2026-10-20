@@ -395,7 +395,7 @@ static void conversation_panel(struct panel p, const struct tui_snapshot *snapsh
     const int visible = p.height - 4;
     const size_t selected = state->selected[focus];
     const size_t start = selected >= (size_t)visible ? selected - (size_t)visible + 1 : 0;
-    const char *headings[] = { columns.width[0] >= 11 ? "Application" : "App", "Domain", "IP", "Port", "Protocol",
+    const char *headings[] = { "Process", "Domain", "IP", "Port", "Protocol",
                               live ? "Down/s" : "Down", live ? "Up/s" : "Up", "Seen" };
     int offset = 0;
 
@@ -435,7 +435,7 @@ static void conversation_panel(struct panel p, const struct tui_snapshot *snapsh
         ip_addr_str(&row->key.remote_ip, address);
         abbreviate(row->name[0] ? row->name : ip_addr_scope(&row->key.remote_ip) != IP_SCOPE_NONE ? ip_scope_label(ip_addr_scope(&row->key.remote_ip)) : "-",
                    (size_t)columns.width[1], 0, domain);
-        abbreviate(row->key.application[0] ? row->key.application : "unresolved",
+        abbreviate(row->key.application[0] ? row->key.application : "—",
                    (size_t)columns.width[0], 0, application);
 
         if (protocol_has_ports(row->key.protocol)) {
@@ -499,7 +499,7 @@ static void application_panel(struct panel p, const struct tui_snapshot *snapsho
     const char *sorts[] = { "total", "download", "upload" };
     char title[100];
 
-    snprintf(title, sizeof title, "Applications | all recorded | %s", sorts[options->sort]);
+    snprintf(title, sizeof title, "Processes | all recorded | %s", sorts[options->sort]);
     draw_border(p, title, state->focus == 2);
 
     const int name_width = p.width - 26;
@@ -507,7 +507,7 @@ static void application_panel(struct panel p, const struct tui_snapshot *snapsho
     const size_t selected = state->selected[2];
     const size_t start = selected >= (size_t)visible ? selected - (size_t)visible + 1 : 0;
 
-    text(p.y + 1, p.x + 1, p.width - 2, A_DIM, "  %-*s", name_width, "Application");
+    text(p.y + 1, p.x + 1, p.width - 2, A_DIM, "  %-*s", name_width, "Process");
     traffic_heading(p.y + 1, p.x + 4 + name_width, "Down", 1);
     traffic_heading(p.y + 1, p.x + 15 + name_width, "Up", 0);
 
@@ -525,15 +525,15 @@ static void application_panel(struct panel p, const struct tui_snapshot *snapsho
         text(p.y + 2 + i, p.x + 1, p.width - 2,
              state->focus == 2 && selected == index ? A_REVERSE : 0,
              "%c %-*.*s %10.10s %10.10s", active ? '*' : selected == index ? '>' : ' ',
-             name_width, name_width, row->name[0] ? row->name : "unresolved", down, up);
+             name_width, name_width, row->name[0] ? row->name : "—", down, up);
     }
 
     if (snapshot->application_count == 0) {
-        text(p.y + 2, p.x + 2, p.width - 4, A_DIM, "No recorded applications");
+        text(p.y + 2, p.x + 2, p.width - 4, A_DIM, "No recorded processes");
     }
 
     text(p.y + p.height - 2, p.x + 2, p.width - 4, A_DIM,
-         "%zu shown | Enter filter | d details | a all apps", snapshot->application_count);
+         "%zu shown | Enter filter | d details | a all processes", snapshot->application_count);
 }
 
 static void endpoint_panel(struct panel p, const struct tui_snapshot *snapshot,
@@ -599,7 +599,7 @@ static void modal(const struct tui_snapshot *snapshot, const struct tui_screen *
         mvhline(y, p.x, ' ', p.width);
     }
 
-    draw_border(p, state->help ? "Help" : state->focus == 2 ? "Selected application" : "Selected endpoint", 1);
+    draw_border(p, state->help ? "Help" : state->focus == 2 ? "Selected process" : "Selected endpoint", 1);
 
     char content[24][320] = { { 0 } };
     size_t count = 0;
@@ -607,14 +607,14 @@ static void modal(const struct tui_snapshot *snapshot, const struct tui_screen *
     if (state->help) {
         const char *lines[] = {
             "Tab / Shift-Tab  Change focused panel", "Up/Down select | Left/Right scroll columns | PgUp/PgDn, Home/End",
-            "Enter           Details; on Applications: filter conversations", "/               Search name, remote IP, or application (conversations)",
+            "Enter           Details; on Processes: filter conversations", "/               Search name, remote IP, or process (conversations)",
             "s: cumulative sort | l: live recency/total/down/up", "r               Live window: 10s / 30s / 120s / all",
             "f               Protocol: any / TCP / UDP / ICMP / ICMPv6 / ESP", "v               Address family: any / IPv4 / IPv6",
             "b               Hold/resume list order; navigation holds it automatically",
             "p               Pause auto-refresh; collector keeps running", "q / Ctrl-C      Quit viewer; collector keeps running",
             "Rates are database counter deltas, not NIC speed.", "IO: down=incoming, up=outgoing; observed packet directions.",
             "Graphs: old -> new, shared scale; _ is zero, @ is peak.", "i: choose collector capture interface (local control socket)",
-            "d: details | a: all apps | Esc: clear app filter and search", "Names are recorded DNS associations, not service proof."
+            "d: details | a: all processes | Esc: clear process filter and search", "Names are recorded DNS associations, not service proof."
         };
 
         count = sizeof lines / sizeof lines[0];
@@ -632,7 +632,7 @@ static void modal(const struct tui_snapshot *snapshot, const struct tui_screen *
             const struct tui_application *row = &snapshot->applications[index];
 
             timestamp(row->last_seen, last);
-            snprintf(content[count++], 320, "Application: %s", row->name[0] ? row->name : "unresolved");
+            snprintf(content[count++], 320, "Process: %s", row->name[0] ? row->name : "Process not identified");
             snprintf(content[count++], 320, "Download: %.0f bytes", row->bytes_down);
             snprintf(content[count++], 320, "Upload:   %.0f bytes", row->bytes_up);
             snprintf(content[count++], 320, "Conversations: %" PRIu64, row->conversations);
@@ -656,7 +656,7 @@ static void modal(const struct tui_snapshot *snapshot, const struct tui_screen *
         } else {
             const struct tui_conversation *row = state->focus == 0 ? &snapshot->live[index] : &snapshot->top[index];
 
-            snprintf(content[count++], 320, "Application: %s", row->key.application[0] ? row->key.application : "unresolved");
+            snprintf(content[count++], 320, "Process: %s", row->key.application[0] ? row->key.application : "Process not identified");
             timestamp(row->totals.first_seen, first);
             timestamp(row->totals.last_seen, last);
             modal_name(content, &count, row->name[0] ? row->name : ip_addr_scope(&row->key.remote_ip) != IP_SCOPE_NONE ? ip_scope_label(ip_addr_scope(&row->key.remote_ip)) : "Unnamed conversation");
@@ -734,8 +734,8 @@ void tui_screen_draw(const struct tui_snapshot *snapshot, const struct tui_optio
     text(0, 1, COLS - 2, A_BOLD | brand_teal, "PIGEON | read-only viewer | %s | refresh %s ago",
          state->paused ? "AUTO-REFRESH PAUSED" : state->browsing ? "BROWSING: order held (b resumes)" : "1s refresh", latest);
     text(0, 1, 6, A_BOLD | brand_blue, "PIGEON");
-    text(1, 1, COLS - 2, 0, "App: %s | Search: %s | Proto: %s | IP: %s | DB: %s",
-         options->application_selected ? (options->application[0] ? options->application : "unresolved") : "all",
+    text(1, 1, COLS - 2, 0, "Process: %s | Search: %s | Proto: %s | IP: %s | DB: %s",
+         options->application_selected ? (options->application[0] ? options->application : "—") : "all",
          options->search[0] ? options->search : "all", options->protocol == 0 ? "any" : protocol_name(options->protocol),
          options->family == 4 ? "v4" : options->family == 6 ? "v6" : "any", path);
 
@@ -772,7 +772,7 @@ void tui_screen_draw(const struct tui_snapshot *snapshot, const struct tui_optio
          "%s", error[0] ? error : state->focus == 2
          ? "Tab panel | arrows select | Enter filter app | / search | s sort | p pause"
          : "Tab panel | Up/Down select | Left/Right columns | Enter details | / search | p pause");
-    text(LINES - 1, 1, COLS - 2, A_DIM, "b resume/hold order | i interfaces | l live sort | a all apps | d details | ? help | q quit");
+    text(LINES - 1, 1, COLS - 2, A_DIM, "b resume/hold order | i interfaces | l live sort | a all processes | d details | ? help | q quit");
 
     if (state->details || state->help) {
         modal(snapshot, state);
