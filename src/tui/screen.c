@@ -713,8 +713,12 @@ void tui_screen_draw(const struct tui_snapshot *snapshot, const struct tui_optio
                        const char *error, int64_t now) {
     erase();
 
+    const int brand_blue = has_colors() && COLOR_PAIRS > TUI_BRAND_TEAL ? COLOR_PAIR(TUI_BRAND_BLUE) : 0;
+    const int brand_teal = has_colors() && COLOR_PAIRS > TUI_BRAND_TEAL ? COLOR_PAIR(TUI_BRAND_TEAL) : 0;
+
     if (COLS < 60 || LINES < 16) {
         text(0, 0, COLS, A_BOLD, "PIGEON: resize to at least 60x16; q quits");
+        text(0, 0, 6, A_BOLD | brand_blue, "PIGEON");
         refresh();
 
         return;
@@ -727,8 +731,9 @@ void tui_screen_draw(const struct tui_snapshot *snapshot, const struct tui_optio
     } else {
         age(now, snapshot->loaded_at, latest);
     }
-    text(0, 1, COLS - 2, A_BOLD | COLOR_PAIR(1), "PIGEON | read-only viewer | %s | refresh %s ago",
+    text(0, 1, COLS - 2, A_BOLD | brand_teal, "PIGEON | read-only viewer | %s | refresh %s ago",
          state->paused ? "AUTO-REFRESH PAUSED" : state->browsing ? "BROWSING: order held (b resumes)" : "1s refresh", latest);
+    text(0, 1, 6, A_BOLD | brand_blue, "PIGEON");
     text(1, 1, COLS - 2, 0, "App: %s | Search: %s | Proto: %s | IP: %s | DB: %s",
          options->application_selected ? (options->application[0] ? options->application : "unresolved") : "all",
          options->search[0] ? options->search : "all", options->protocol == 0 ? "any" : protocol_name(options->protocol),

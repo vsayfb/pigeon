@@ -186,6 +186,10 @@ including zero-payload packets; they do not indicate which side initiated a
 connection or whether traffic is flowing in this refresh interval. Non-Unicode
 locales use `v` / `^` instead. LAN detection is not implemented.
 
+The TUI uses a text-only PIGEON wordmark in the GUI icon's blue/teal palette,
+with basic-color and monochrome fallbacks. No image protocol or special font is
+required.
+
 The screen contains Traffic overview, Live traffic, Top Conversations,
 Applications, and New endpoints. Wide terminals show all panels; smaller
 terminals show the overview and one selectable list. The minimum size is

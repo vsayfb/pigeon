@@ -331,6 +331,8 @@ int main(void) {
     CHECK(init_pair(1, COLOR_CYAN, -1) == OK);
     CHECK(init_pair(2, COLOR_GREEN, -1) == OK);
     CHECK(init_pair(3, COLOR_YELLOW, -1) == OK);
+    CHECK(init_pair(TUI_BRAND_BLUE, COLOR_BLUE, -1) == OK);
+    CHECK(init_pair(TUI_BRAND_TEAL, COLOR_CYAN, -1) == OK);
     CHECK(resizeterm(40, 180) == OK);
 
     snapshot->live_count = snapshot->top_count = 1;

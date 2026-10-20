@@ -7,6 +7,9 @@
 #define TUI_KEY_REFRESH 2
 #define TUI_KEY_INTERFACES 4
 
+#define TUI_BRAND_BLUE 4
+#define TUI_BRAND_TEAL 5
+
 struct tui_screen {
     int focus;                /* live, top conversations, applications, new endpoints */
     size_t selected[4];

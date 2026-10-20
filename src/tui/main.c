@@ -105,12 +105,17 @@ static int run_screen(struct tui_reader *reader, struct tui_snapshot *snapshot,
     wtimeout(stdscr, 100);
     curs_set(0);
 
-    if (has_colors()) {
-        start_color();
-        use_default_colors();
-        init_pair(1, COLOR_CYAN, -1);
-        init_pair(2, COLOR_GREEN, -1);
-        init_pair(3, COLOR_YELLOW, -1);
+    if (has_colors() && start_color() == OK) {
+        const short background = use_default_colors() == OK ? -1 : COLOR_BLACK;
+
+        init_pair(1, COLOR_CYAN, background);
+        init_pair(2, COLOR_GREEN, background);
+        init_pair(3, COLOR_YELLOW, background);
+
+        if (COLOR_PAIRS > TUI_BRAND_TEAL) {
+            init_pair(TUI_BRAND_BLUE, COLORS >= 256 ? 33 : COLOR_BLUE, background);
+            init_pair(TUI_BRAND_TEAL, COLORS >= 256 ? 37 : COLOR_CYAN, background);
+        }
     }
 
     struct sigaction action = { .sa_handler = on_signal };
