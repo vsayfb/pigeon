@@ -51,6 +51,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Keep the parent writable by the runner after Docker writes artifacts.
+          mkdir -p dist
           if [[ "$RELEASE_LIBC" == glibc ]]; then
             image=ubuntu:22.04
             dependencies='apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential cmake ninja-build libpcap-dev libsqlite3-dev libncursesw5-dev python3 patchelf file'
