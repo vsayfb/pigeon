@@ -78,6 +78,7 @@ jobs:
         run: |
           python3 packaging/release.py site --version "$RELEASE_VERSION" --artifacts dist --output dist/site
           python3 packaging/test_installer.py --site dist/site
+          python3 packaging/test_manager.py --control release-build/core-*/pigeon-control
       - uses: actions/upload-artifact@v4
         with:
           name: core-${{ matrix.runner }}-${{ matrix.libc }}

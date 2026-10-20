@@ -93,3 +93,9 @@ execute_process(COMMAND "${PIGEON}" --debug-attribution -r "${FIXTURE}"
 if(NOT rc EQUAL 2 OR NOT errors MATCHES "usage:")
     message(FATAL_ERROR "Offline attribution diagnostics were accepted: ${rc}: ${errors}")
 endif()
+
+execute_process(COMMAND "${PIGEON}" --background -r "${FIXTURE}"
+    RESULT_VARIABLE rc OUTPUT_VARIABLE output ERROR_VARIABLE errors)
+if(NOT rc EQUAL 2 OR NOT errors MATCHES "usage:")
+    message(FATAL_ERROR "Background replay must be rejected: ${errors}")
+endif()

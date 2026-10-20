@@ -13,16 +13,56 @@ and command symlinks in `~/.local/bin`. Each installs only its own component.
 Existing databases are preserved. Add `export PATH="$HOME/.local/bin:$PATH"`
 to your shell configuration if needed.
 
+After installation, run:
+
 ```sh
-sudo "$HOME/.local/bin/pigeon" --db "$HOME/.local/share/pigeon/pigeon.db"
-pigeon-tui --db "$HOME/.local/share/pigeon/pigeon.db"
+pigeon
+```
+
+This starts capture in the background if necessary, then opens the TUI with the
+shared database automatically. Sudo requests administrator privileges when
+starting capture. Closing the TUI leaves the collector running.
+
+```sh
+pigeon start              # Background capture only
+pigeon start eth0         # Or select an interface
+pigeon stop               # Graceful stop, after saving pending traffic
+pigeon restart            # Stop and start again
+pigeon status             # Running interface, or stopped
+pigeon logs               # Follow collector output
+pigeon tui                # View stored traffic without starting capture
+```
+
+The database is `~/.local/share/pigeon/pigeon.db` and the log is
+`~/.local/share/pigeon/pigeon.log`, independent of the working directory.
+`pigeon-tui` without arguments uses the same database. GUI users can open it with:
+
+```sh
 pigeon-gui --database "$HOME/.local/share/pigeon/pigeon.db"
 ```
 
-Sudo commonly excludes `~/.local/bin` from PATH, hence the absolute capture
-command. Without `--db`, the collector still uses `pigeon.db` in its working
-directory. Installation does not create a service or grant special executable
-permissions.
+The collector detaches into its own session; closing the terminal or pressing
+Ctrl+C in the TUI does not stop capture. This does not
+configure boot startup or automatic restart after a crash. Run `pigeon` or
+`pigeon start` after reboot. Status and stop use the existing authenticated local
+control socket; they do not rely on PID files or guessed process identities.
+The invoking sudo user's ID remains authorized to control the collector.
+Shutdown keeps the socket until the final store flush and cleanup have completed.
+
+Advanced foreground capture and replay remain available:
+
+```sh
+sudo "$HOME/.local/bin/pigeon" capture --db /path/to/pigeon.db
+pigeon capture -r /path/to/traffic.pcap --verbose
+```
+
+The source-build `./build/pigeon` executable remains the foreground collector.
+Release bundles call it `pigeon-collector` internally and expose the command
+manager as `pigeon`. If upgrading from 0.0.1 with foreground capture still
+running, stop that old process with Ctrl+C once before using `pigeon start`.
+
+Both installers show six installation stages and a download progress bar on an
+interactive terminal. Metadata downloads are quiet; errors remain visible.
 
 ## Configure GitHub Actions
 
@@ -38,7 +78,7 @@ Run **Release and publish Pigeon GUI** in the GUI repository when ready.
 Either workflow can create the Direct Upload Pages project `piigeon` on its
 first run. A `vX.Y.Z` tag matching the version in that repository's
 `CMakeLists.txt` also triggers release. Versions are independent: CLI currently
-`0.0.1`, GUI currently `0.1.0`.
+`0.0.2`, GUI currently `0.1.0`.
 
 ## How the shared deployment works
 
@@ -93,8 +133,8 @@ Build prerequisites: C compiler, CMake, Ninja, libpcap/SQLite/ncurses developmen
 files, Python 3.10+, and patchelf. Musl builds also need Linux kernel headers.
 
 ```sh
-python3 packaging/release.py build --version 0.0.1 --output dist
-python3 packaging/release.py site --version 0.0.1 --artifacts dist --output dist/upload
+python3 packaging/release.py build --version 0.0.2 --output dist
+python3 packaging/release.py site --version 0.0.2 --artifacts dist --output dist/upload
 PIGEON_INSTALL_ROOT=/tmp/pigeon-check/data PIGEON_BIN_DIR=/tmp/pigeon-check/bin \
   sh packaging/install.sh --from "$PWD/dist/upload"
 ```
@@ -114,3 +154,7 @@ the database and sidecars to retain history.
 
 References: [Cloudflare Pages Direct Upload](https://developers.cloudflare.com/pages/how-to/use-direct-upload-with-continuous-integration/),
 [Pages limits](https://developers.cloudflare.com/pages/platform/limits/).
+
+`PIGEON_DATA_DIR` overrides the installed manager's data/log directory;
+`PIGEON_DATABASE` overrides its database path (both absolute). These runtime
+overrides do not change the installation directory or modify existing data.

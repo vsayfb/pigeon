@@ -499,3 +499,8 @@ Details show the range classification. Neither SQLite nor packet tracking change
 The one-command installer and Cloudflare Pages release workflow are documented
 in [docs/INSTALLATION.md](docs/INSTALLATION.md). The collector and TUI are installed
 by `/cli/install.sh`; the optional GUI has its own installer and workflow in the GUI repository.
+
+For installed releases, run `pigeon` to start background capture and open the TUI.
+Use `pigeon start`, `pigeon stop`, `pigeon restart`, `pigeon status`, and
+`pigeon logs` to manage capture. The source-build executable remains the foreground
+collector; `pigeon capture` exposes that mode in installed releases.

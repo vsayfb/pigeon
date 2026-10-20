@@ -38,7 +38,15 @@ with tempfile.TemporaryDirectory(prefix='pigeon-installer-test-') as temporary:
     first = (commands / 'pigeon').resolve()
     assert (commands / 'pigeon').is_symlink()
     assert (commands / 'pigeon-tui').is_symlink()
-    assert subprocess.check_output([str(commands / 'pigeon'), '--version'], text=True).startswith('pigeon ')
+    version = subprocess.check_output([str(commands / 'pigeon'), '--version'], text=True)
+    assert version.startswith('pigeon ')
+    assert subprocess.check_output([str(commands / 'pigeon'), 'capture', '--version'], text=True) == version
+    assert (first.parent / 'pigeon-collector').is_file()
+    assert (first.parent / 'pigeon-control').is_file()
+    status = subprocess.run([str(commands / 'pigeon'), 'status'], capture_output=True, text=True)
+    assert status.returncode == 1 and 'stopped' in status.stdout
+    assert not (root / 'pigeon.db').exists()  # Status must not start capture.
+
     database = root / 'pigeon.db'
     database.write_bytes(b'preserve existing history')
     install()

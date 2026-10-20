@@ -1,0 +1,105 @@
+#!/bin/sh
+# Installed entry point. The capture executable remains available via `capture`.
+set -eu
+
+self=$(readlink -f "$0")
+bundle=$(dirname "$(dirname "$self")")
+default_data=$(dirname "$(dirname "$bundle")")
+if [ "$(basename "$(dirname "$bundle")")" != versions ]; then
+    default_data=${XDG_DATA_HOME:-$HOME/.local/share}/pigeon
+fi
+data=${PIGEON_DATA_DIR:-$default_data}
+database=${PIGEON_DATABASE:-$data/pigeon.db}
+log=$data/pigeon.log
+collector=$bundle/bin/pigeon-collector
+control=$bundle/bin/pigeon-control
+
+fail() { printf 'pigeon: %s\n' "$*" >&2; exit 1; }
+
+case "$data:$database" in /*:/*) ;; *) fail 'data and database paths must be absolute' ;; esac
+
+validate_interface() {
+    [ "$#" -le 1 ] || fail 'usage: pigeon start|restart [interface]'
+    if [ "$#" = 1 ]; then
+        case "$1" in -*) fail 'usage: pigeon start|restart [interface]' ;; esac
+    fi
+}
+
+start() {
+    validate_interface "$@"
+    if state=$("$control" status "$database"); then
+        printf '%s\n' "$state"
+        return 0
+    else
+        result=$?
+        [ "$result" = 1 ] || return "$result"
+    fi
+    mkdir -p "$data"
+    touch "$log" || fail "cannot write $log"
+    if [ "$(id -u)" != 0 ]; then
+        command -v sudo >/dev/null 2>&1 || fail 'sudo is required to start capture'
+        printf 'Capture needs administrator privileges.\n'
+        sudo -v || return 1
+    fi
+    printf 'Starting Pigeon in the background...\n'
+    (
+        umask 022
+        if [ "$(id -u)" = 0 ]; then
+            "$collector" --background --db "$database" "$@" >> "$log" 2>&1 < /dev/null
+        else
+            sudo -n "$collector" --background --db "$database" "$@" >> "$log" 2>&1 < /dev/null
+        fi
+    )
+    for attempt in 1 2 3 4 5 6 7 8 9 10; do
+        sleep 1
+        if state=$("$control" status "$database" 2>/dev/null); then
+            printf '%s\n' "$state"
+            return 0
+        fi
+    done
+    tail -n 10 "$log" >&2
+    fail 'collector did not start; see pigeon logs'
+}
+
+case "${1:-}" in
+    '')
+        start
+        exec "$bundle/bin/pigeon-tui" --db "$database" ;;
+    start)
+        shift
+        start "$@" ;;
+    stop)
+        [ "$#" = 1 ] || fail 'usage: pigeon stop'
+        "$control" stop "$database" ;;
+    restart)
+        shift
+        validate_interface "$@"
+        "$control" stop "$database"
+        start "$@" ;;
+    status)
+        [ "$#" = 1 ] || fail 'usage: pigeon status'
+        "$control" status "$database" ;;
+    logs)
+        [ "$#" = 1 ] || fail 'usage: pigeon logs'
+        [ -f "$log" ] || fail 'no collector log yet; run pigeon start'
+        exec tail -n 50 -f "$log" ;;
+    tui)
+        shift
+        exec "$bundle/bin/pigeon-tui" --db "$database" "$@" ;;
+    capture)
+        shift
+        exec "$collector" "$@" ;;
+    --version)
+        exec "$collector" --version ;;
+    help|--help|-h)
+        printf '%s\n' 'Pigeon — see whom your device communicates with.' '' \
+            'pigeon                    Start capture if needed, then open the TUI' \
+            'pigeon start [interface]  Start background capture' \
+            'pigeon stop               Stop capture and save pending traffic' \
+            'pigeon restart [iface]    Restart background capture' \
+            'pigeon status             Show collector status' \
+            'pigeon logs               Follow the collector log' \
+            'pigeon tui                Open the TUI without starting capture' \
+            'pigeon capture <args>     Run the foreground collector directly' ;;
+    *) fail 'unknown command; run pigeon --help' ;;
+esac

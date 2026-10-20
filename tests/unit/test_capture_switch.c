@@ -4,6 +4,8 @@
 
 #include "../t.h"
 
+#include <sys/wait.h>
+
 static int fake_source;
 static int fail_open;
 static int stopped;
@@ -55,6 +57,21 @@ void __wrap_capture_stop(void) {
 }
 
 int main(void) {
+    const pid_t original_session = getsid(0);
+    const int detached = detach_capture();
+
+    CHECK(detached != -1);
+
+    if (detached == 0) {
+        CHECK(getsid(0) == getpid() && getsid(0) != original_session);
+        _exit(0);
+    }
+
+    int child_status;
+
+    CHECK(wait(&child_status) > 0);
+    CHECK(WIFEXITED(child_status) && WEXITSTATUS(child_status) == 0);
+
     struct capture_context context = { 0 };
     char error[STORE_ERROR_LEN];
     char reply[1024];
@@ -89,6 +106,8 @@ int main(void) {
 
     control_command("SELECT wifi0", reply, sizeof reply, &context);
     CHECK(strncmp(reply, "OK\twifi0\tmanual", 15) == 0 && !stopped);
+    control_command("STATUS", reply, sizeof reply, &context);
+    CHECK(strcmp(reply, "OK\twifi0\tmanual\n") == 0 && !stopped);
     control_command("INVALID", reply, sizeof reply, &context);
     CHECK(strncmp(reply, "ERROR", 5) == 0);
     control_command("AUTO", reply, sizeof reply, &context);
@@ -106,6 +125,10 @@ int main(void) {
     CHECK(store_lookup(context.store, &key, &row) == 1 && row.delta.bytes_out == 7);
     CHECK(flow_flush(context.flows) == 0);
     CHECK(store_lookup(context.store, &key, &row) == 1 && row.delta.bytes_out == 7);
+
+    control_command("STOP", reply, sizeof reply, &context);
+    CHECK(strcmp(reply, "OK\tStopping\n") == 0);
+    CHECK(context.shutdown_requested && stopped == 2);
 
     capture_source_close(context.pending_source);
     flow_destroy(context.pending_flows);

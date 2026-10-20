@@ -44,6 +44,7 @@ struct capture_context {
     struct netif_info current_info;
     int automatic;
     int pending_automatic;
+    int shutdown_requested;
 };
 
 static void report_flow_error(struct capture_context *context) {
@@ -59,6 +60,21 @@ static void report_flow_error(struct capture_context *context) {
 
 static void control_command(const char *request, char *reply, size_t capacity, void *user) {
     struct capture_context *context = user;
+
+    if (strcmp(request, "STOP") == 0) {
+        context->shutdown_requested = 1;
+        capture_stop();
+        snprintf(reply, capacity, "OK\tStopping\n");
+
+        return;
+    }
+
+    if (strcmp(request, "STATUS") == 0) {
+        snprintf(reply, capacity, "OK\t%s\t%s\n", context->current_info.name,
+                 context->automatic ? "auto" : "manual");
+
+        return;
+    }
 
     if (strcmp(request, "LIST") == 0) {
         const int used = snprintf(reply, capacity, "OK\t%s\t%s\n", context->current_info.name,
@@ -238,6 +254,57 @@ static void print_conversation(const struct flow_entry *entry, void *user) {
     putchar('\n');
 }
 
+/* Return one in the parent after the child has acquired its own session. */
+static int detach_capture(void) {
+    int ready[2];
+
+    if (pipe(ready) == -1) {
+        return -1;
+    }
+
+    const pid_t child = fork();
+
+    if (child == -1) {
+        close(ready[0]);
+        close(ready[1]);
+
+        return -1;
+    }
+
+    if (child != 0) {
+        char result;
+        ssize_t count;
+
+        close(ready[1]);
+
+        do {
+            count = read(ready[0], &result, 1);
+        } while (count == -1 && errno == EINTR);
+
+        close(ready[0]);
+
+        if (count == 1 && result == '1') {
+            return 1;
+        }
+
+        errno = EIO;
+
+        return -1;
+    }
+
+    close(ready[0]);
+
+    if (setsid() == -1 || write(ready[1], "1", 1) != 1) {
+        close(ready[1]);
+
+        return -1;
+    }
+
+    close(ready[1]);
+
+    return 0;
+}
+
 int main(const int argc, char **argv) {
     if (argc == 2 && strcmp(argv[1], "--version") == 0) {
         printf("pigeon %s\n", PIGEON_VERSION);
@@ -248,6 +315,7 @@ int main(const int argc, char **argv) {
     struct capture_context context = { 0 };
     const char *source = NULL;
     int offline = 0;
+    int background = 0;
     int invalid = 0;
 
     const char *local_addresses[64];
@@ -255,7 +323,9 @@ int main(const int argc, char **argv) {
     const char *database_path = NULL;
 
     for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--verbose") == 0) {
+        if (strcmp(argv[i], "--background") == 0) {
+            background = 1;
+        } else if (strcmp(argv[i], "--verbose") == 0) {
             context.verbose = 1;
         } else if (strcmp(argv[i], "--debug-attribution") == 0) {
             context.debug_attribution = 1;
@@ -277,13 +347,27 @@ int main(const int argc, char **argv) {
         }
     }
 
-    if (invalid || (offline && context.debug_attribution) || (local_count != 0 && !offline) ||
+    if (invalid || (offline && (context.debug_attribution || background)) || (local_count != 0 && !offline) ||
         (database_path != NULL && offline && local_count == 0)) {
         fprintf(stderr, "pigeon %s\nusage: %s [--verbose] [--debug-attribution] [--db <path>] [interface]\n"
                         "       %s [--verbose] [--db <path>] [--local-ip <IP> ...] -r <file.pcap>\n",
                 PIGEON_VERSION, argv[0], argv[0]);
 
         return 2;
+    }
+
+    if (background) {
+        const int detached = detach_capture();
+
+        if (detached == -1) {
+            perror("background capture");
+
+            return 1;
+        }
+
+        if (detached == 1) {
+            return 0;
+        }
     }
 
     struct netif_info info = { 0 };
@@ -434,7 +518,8 @@ int main(const int argc, char **argv) {
                 rc = capture_source_run(live, observe_frame, tick_flows, &context);
                 live = NULL;
 
-                if (context.pending_source == NULL || rc == -1 || context.failed || capture_was_signalled()) {
+                if (context.shutdown_requested || context.pending_source == NULL || rc == -1 ||
+                    context.failed || capture_was_signalled()) {
                     break;
                 }
 
@@ -452,8 +537,6 @@ int main(const int argc, char **argv) {
             }
         }
 
-        control_server_close(context.control);
-        context.control = NULL;
         capture_source_close(context.pending_source);
         flow_destroy(context.pending_flows);
     }
@@ -476,6 +559,7 @@ int main(const int argc, char **argv) {
     app_resolver_destroy(context.applications);
     dns_cache_destroy(context.dns);
     store_close(context.store);
+    control_server_close(context.control);
 
     return rc == 0 && !context.failed ? 0 : 1;
 }

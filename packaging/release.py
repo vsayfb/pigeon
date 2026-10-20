@@ -117,12 +117,14 @@ def build(args):
     stage = build_dir / 'package'
     run('cmake', '-S', source, '-B', build_dir, '-G', 'Ninja',
         '-DCMAKE_BUILD_TYPE=Release', '-DPIGEON_SANITIZE=OFF', '-DBUILD_TESTING=OFF')
-    targets = ['pigeon', 'pigeon-tui']
+    targets = ['pigeon', 'pigeon-tui', 'pigeon-control']
     run('cmake', '--build', build_dir, '--parallel', str(args.jobs), '--target', *targets)
     shutil.rmtree(stage, ignore_errors=True)
     (stage / 'bin').mkdir(parents=True)
     for target in targets:
-        shutil.copy2(build_dir / target, stage / 'bin' / target)
+        name = 'pigeon-collector' if target == 'pigeon' else target
+        shutil.copy2(build_dir / target, stage / 'bin' / name)
+    shutil.copy2(ROOT / 'packaging/pigeon.sh', stage / 'bin' / 'pigeon')
     # Resolve the executable from its public symlink before locating resources.
     executable = stage / 'bin' / 'pigeon-tui'
     executable.rename(stage / 'bin' / 'pigeon-tui.real')
@@ -131,6 +133,14 @@ set -eu
 self=$(readlink -f "$0")
 bundle=$(dirname "$(dirname "$self")")
 export TERMINFO_DIRS="$bundle/share/terminfo:${TERMINFO_DIRS:-/etc/terminfo:/lib/terminfo:/usr/share/terminfo}"
+if [ "$#" = 0 ]; then
+    default_data=$(dirname "$(dirname "$bundle")")
+    if [ "$(basename "$(dirname "$bundle")")" != versions ]; then
+        default_data=${XDG_DATA_HOME:-$HOME/.local/share}/pigeon
+    fi
+    data=${PIGEON_DATA_DIR:-$default_data}
+    set -- --db "${PIGEON_DATABASE:-$data/pigeon.db}"
+fi
 exec "$bundle/bin/pigeon-tui.real" "$@"
 ''')
     executable.chmod(0o755)
@@ -144,7 +154,7 @@ exec "$bundle/bin/pigeon-tui.real" "$@"
         'Pigeon Linux release\n\nBinaries locate bundled libraries relative to themselves.\n'
         'The host supplies libc/ELF loader, kernel interfaces, and graphics drivers.\n'
         'See RUNTIME_DEPENDENCIES.json and LICENSES for bundled runtime dependencies.\n'
-        'No capture service is installed. Existing databases are not changed by installation.\n')
+        'No boot service is installed. Existing databases are not changed by installation.\n')
     destination = args.output.resolve()
     destination.mkdir(parents=True, exist_ok=True)
     name = f'pigeon-core-linux-{arch}-{libc}.tar.gz'

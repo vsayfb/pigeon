@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(pigeon VERSION 0.0.1 LANGUAGES C)
+project(pigeon VERSION 0.0.2 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -277,3 +277,12 @@ add_test(NAME address_scope COMMAND test_address_scope)
 
 include(GNUInstallDirs)
 install(TARGETS pigeon pigeon-tui RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+add_executable(pigeon-control src/control/main.c src/control/control.c)
+
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND Python3_Interpreter_FOUND)
+    add_test(NAME control_client COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tests/integration/test_control_client.py
+            $<TARGET_FILE:pigeon-control>)
+endif()
