@@ -18,7 +18,9 @@ BASE = 'https://piigeon.pages.dev'
 def fetch(url):
     for attempt in range(3):
         try:
-            request = urllib.request.Request(url, headers={'Cache-Control': 'no-cache'})
+            request = urllib.request.Request(url, headers={
+                'Cache-Control': 'no-cache', 'User-Agent': 'Pigeon-release/1.0'
+            })
             with urllib.request.urlopen(request, timeout=120) as response:
                 return response.read()
         except urllib.error.HTTPError as error:
