@@ -78,7 +78,7 @@ Run **Release and publish Pigeon GUI** in the GUI repository when ready.
 Either workflow can create the Direct Upload Pages project `piigeon` on its
 first run. A `vX.Y.Z` tag matching the version in that repository's
 `CMakeLists.txt` also triggers release. Versions are independent: CLI currently
-`0.0.2`, GUI currently `0.1.0`.
+`0.0.3`, GUI currently `0.0.2`.
 
 ## How the shared deployment works
 
@@ -133,8 +133,8 @@ Build prerequisites: C compiler, CMake, Ninja, libpcap/SQLite/ncurses developmen
 files, Python 3.10+, and patchelf. Musl builds also need Linux kernel headers.
 
 ```sh
-python3 packaging/release.py build --version 0.0.2 --output dist
-python3 packaging/release.py site --version 0.0.2 --artifacts dist --output dist/upload
+python3 packaging/release.py build --version 0.0.3 --output dist
+python3 packaging/release.py site --version 0.0.3 --artifacts dist --output dist/upload
 PIGEON_INSTALL_ROOT=/tmp/pigeon-check/data PIGEON_BIN_DIR=/tmp/pigeon-check/bin \
   sh packaging/install.sh --from "$PWD/dist/upload"
 ```
@@ -158,3 +158,7 @@ References: [Cloudflare Pages Direct Upload](https://developers.cloudflare.com/p
 `PIGEON_DATA_DIR` overrides the installed manager's data/log directory;
 `PIGEON_DATABASE` overrides its database path (both absolute). These runtime
 overrides do not change the installation directory or modify existing data.
+
+Uninstall CLI/TUI with `pigeon uninstall`. Capture is stopped and pending
+traffic saved before removal. The GUI, traffic database and logs are kept.
+Uninstall GUI separately with `pigeon-gui --uninstall`.

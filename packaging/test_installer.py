@@ -64,4 +64,15 @@ with tempfile.TemporaryDirectory(prefix='pigeon-installer-test-') as temporary:
     assert (commands / 'pigeon').resolve() == second
     assert database.read_bytes() == b'preserve existing history'
 
+    # Exercise the public uninstall command against the installed bundle.
+    gui = root / 'versions' / 'gui-preserve'
+    gui.mkdir()
+    (gui / 'COMPONENT').write_text('gui')
+    subprocess.run([str(commands / 'pigeon'), 'uninstall'], env=environment, check=True)
+    assert database.read_bytes() == b'preserve existing history'
+    assert gui.exists()
+    assert not (commands / 'pigeon').is_symlink()
+    assert not (commands / 'pigeon-tui').is_symlink()
+    assert not first.exists() and not second.exists()
+
 print('Installer checks passed: collision, install, reinstall, corrupt download, history preservation')

@@ -150,6 +150,7 @@ for component in $components; do
     # Unique destination also permits reinstalling the same version safely.
     destination=$(mktemp -d "$root/versions/$version-$component.XXXXXX")
     cp -R "$work/$component/." "$destination/"
+    printf '%s\n' "$bin" > "$destination/INSTALL_BIN"
     commands='pigeon pigeon-tui'
     [ "$component" = core ] || commands=pigeon-gui
     for command in $commands; do
@@ -177,3 +178,5 @@ else
     printf 'Viewer: "%s/pigeon-gui" --database "%s/pigeon.db"\n' "$bin" "$root"
     printf 'The collector is installed separately using /cli/install.sh.\n'
 fi
+
+printf 'Uninstall CLI/TUI: pigeon uninstall (keeps your database).\n'

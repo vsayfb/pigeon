@@ -65,6 +65,9 @@ case "${1:-}" in
     '')
         start
         exec "$bundle/bin/pigeon-tui" --db "$database" ;;
+    uninstall)
+        [ "$#" = 1 ] || fail 'usage: pigeon uninstall'
+        exec sh "$bundle/share/uninstall.sh" "$bundle" core ;;
     start)
         shift
         start "$@" ;;
@@ -97,6 +100,7 @@ case "${1:-}" in
             'pigeon start [interface]  Start background capture' \
             'pigeon stop               Stop capture and save pending traffic' \
             'pigeon restart [iface]    Restart background capture' \
+            'pigeon uninstall          Remove CLI/TUI, keeping traffic history' \
             'pigeon status             Show collector status' \
             'pigeon logs               Follow the collector log' \
             'pigeon tui                Open the TUI without starting capture' \
