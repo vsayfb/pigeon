@@ -180,6 +180,49 @@ static void test_browsing_selection(void) {
     free(next);
 }
 
+static void test_local_labels(void) {
+    struct tui_snapshot *snapshot = calloc(1, sizeof *snapshot);
+    struct tui_options options = { .recent_seconds = 30 };
+    struct tui_screen state = { 0 };
+
+    CHECK(snapshot != NULL);
+    CHECK(resizeterm(40, 240) == OK);
+    snapshot->live_count = snapshot->top_count = snapshot->endpoint_count = 1;
+    snapshot->live[0].key.remote_ip = ip_addr_v4(0xc0a80101);
+    snapshot->live[0].key.protocol = 17;
+    snapshot->live[0].key.remote_port = 53;
+    snapshot->top[0] = snapshot->live[0];
+    snapshot->endpoints[0].ip = snapshot->live[0].key.remote_ip;
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK(columns_contain(0, 120, "Local network"));
+    CHECK(columns_contain(0, 120, "192.168.1.1"));
+    CHECK(columns_contain(120, 120, "Local network"));
+    tui_screen_key('d', snapshot, &options, &state);
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK(contains("address-range label (not DNS)"));
+    CHECK(contains("Private address range"));
+    tui_screen_key(27, snapshot, &options, &state);
+
+    strcpy(snapshot->live[0].name, "router.test");
+    snapshot->top[0] = snapshot->live[0];
+    strcpy(snapshot->endpoints[0].name, "router.test");
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK(columns_contain(0, 120, "router.test"));
+    CHECK(!columns_contain(0, 120, "Local network"));
+
+    snapshot->live[0].name[0] = '\0';
+    CHECK(ip_addr_parse("::1", &snapshot->live[0].key.remote_ip) == 0);
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK(columns_contain(0, 120, "This device"));
+    CHECK(!columns_contain(0, 120, "Local network"));
+    snapshot->live[0].key.remote_ip = ip_addr_v4(0x08080808);
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK(!columns_contain(0, 120, "This device"));
+    CHECK(!columns_contain(0, 120, "Local network"));
+    CHECK(resizeterm(40, 180) == OK);
+    free(snapshot);
+}
+
 static void test_row_directions(void) {
     struct tui_snapshot *snapshot = calloc(1, sizeof *snapshot);
     struct tui_options options = { .recent_seconds = 30 };
@@ -503,6 +546,7 @@ int main(void) {
     CHECK(tui_screen_key('i', snapshot, &options, &state) == TUI_KEY_INTERFACES);
 
     test_browsing_selection();
+    test_local_labels();
     test_row_directions();
     test_endpoint_abbreviations();
 

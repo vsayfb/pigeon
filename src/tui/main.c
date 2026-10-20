@@ -47,7 +47,7 @@ static void print_row(const struct tui_conversation *row) {
            ip_addr_str(&row->key.remote_ip, remote), row->key.remote_ip.family == 6 ? "]" : "",
            row->key.remote_port, row->key.protocol == 6 ? "TCP" : "UDP",
            row->totals.bytes_in, row->totals.bytes_out);
-    print_safe(row->name[0] ? row->name : "-");
+    print_safe(row->name[0] ? row->name : ip_addr_scope(&row->key.remote_ip) != IP_SCOPE_NONE ? ip_scope_label(ip_addr_scope(&row->key.remote_ip)) : "-");
     putchar('\n');
 }
 
@@ -84,7 +84,7 @@ static void print_snapshot(const struct tui_snapshot *snapshot) {
 
         printf("%s first_seen=%" PRId64 " name=",
                ip_addr_str(&snapshot->endpoints[i].ip, address), snapshot->endpoints[i].first_seen);
-        print_safe(snapshot->endpoints[i].name[0] ? snapshot->endpoints[i].name : "-");
+        print_safe(snapshot->endpoints[i].name[0] ? snapshot->endpoints[i].name : ip_addr_scope(&snapshot->endpoints[i].ip) != IP_SCOPE_NONE ? ip_scope_label(ip_addr_scope(&snapshot->endpoints[i].ip)) : "-");
         putchar('\n');
     }
 }

@@ -301,6 +301,10 @@ static struct conversation_columns conversation_columns(int panel_width,
         char address[IP_ADDR_STR_LEN];
         const int length = (int)strlen(ip_addr_str(&rows[i].key.remote_ip, address));
 
+        if (rows[i].name[0] == '\0' && ip_addr_scope(&rows[i].key.remote_ip) != IP_SCOPE_NONE) {
+            columns.width[1] = 13;
+        }
+
         if (length > columns.width[2]) {
             columns.width[2] = length;
         }
@@ -429,7 +433,8 @@ static void conversation_panel(struct panel p, const struct tui_snapshot *snapsh
         char up[20];
 
         ip_addr_str(&row->key.remote_ip, address);
-        abbreviate(row->name[0] ? row->name : "-", (size_t)columns.width[1], 0, domain);
+        abbreviate(row->name[0] ? row->name : ip_addr_scope(&row->key.remote_ip) != IP_SCOPE_NONE ? ip_scope_label(ip_addr_scope(&row->key.remote_ip)) : "-",
+                   (size_t)columns.width[1], 0, domain);
         abbreviate(row->key.application[0] ? row->key.application : "unresolved",
                    (size_t)columns.width[0], 0, application);
 
@@ -547,7 +552,8 @@ static void endpoint_panel(struct panel p, const struct tui_snapshot *snapshot,
         char first[40];
 
         ip_addr_str(&row->ip, address);
-        endpoint_label(row->name, address, p.width - 25, label);
+        endpoint_label(row->name[0] ? row->name : ip_addr_scope(&row->ip) != IP_SCOPE_NONE ? ip_scope_label(ip_addr_scope(&row->ip)) : "",
+                       address, p.width - 25, label);
         timestamp(row->first_seen, first);
         text(p.y + 1 + i, p.x + 1, p.width - 2,
              state->focus == 3 && selected == index ? A_REVERSE : 0,
@@ -638,18 +644,22 @@ static void modal(const struct tui_snapshot *snapshot, const struct tui_screen *
 
             timestamp(row->first_seen, first);
             timestamp(row->last_seen, last);
-            modal_name(content, &count, row->name[0] ? row->name : "Unnamed endpoint");
+            modal_name(content, &count, row->name[0] ? row->name : ip_addr_scope(&row->ip) != IP_SCOPE_NONE ? ip_scope_label(ip_addr_scope(&row->ip)) : "Unnamed endpoint");
             snprintf(content[count++], 320, "Remote IP:");
             snprintf(content[count++], 320, "%s", ip_addr_str(&row->ip, address));
             snprintf(content[count++], 320, "First seen: %s", first);
             snprintf(content[count++], 320, "Last seen:  %s", last);
+
+            if (ip_addr_scope(&row->ip) != IP_SCOPE_NONE) {
+                snprintf(content[count++], 320, "Address info: %s", ip_scope_description(ip_addr_scope(&row->ip)));
+            }
         } else {
             const struct tui_conversation *row = state->focus == 0 ? &snapshot->live[index] : &snapshot->top[index];
 
             snprintf(content[count++], 320, "Application: %s", row->key.application[0] ? row->key.application : "unresolved");
             timestamp(row->totals.first_seen, first);
             timestamp(row->totals.last_seen, last);
-            modal_name(content, &count, row->name[0] ? row->name : "Unnamed conversation");
+            modal_name(content, &count, row->name[0] ? row->name : ip_addr_scope(&row->key.remote_ip) != IP_SCOPE_NONE ? ip_scope_label(ip_addr_scope(&row->key.remote_ip)) : "Unnamed conversation");
             snprintf(content[count++], 320, "Remote IP:");
             snprintf(content[count++], 320, "%s", ip_addr_str(&row->key.remote_ip, address));
             snprintf(content[count++], 320, "Local IP:");
@@ -663,7 +673,11 @@ static void modal(const struct tui_snapshot *snapshot, const struct tui_screen *
             snprintf(content[count++], 320, "Upload:   %" PRIu64 " bytes, %" PRIu64 " packets", row->totals.bytes_out, row->totals.packets_out);
             snprintf(content[count++], 320, "First seen: %s", first);
             snprintf(content[count++], 320, "Last seen:  %s", last);
-            snprintf(content[count++], 320, "Name source: %s", row->name[0] ? "recorded DNS association" : "unknown");
+            snprintf(content[count++], 320, "Name source: %s", row->name[0] ? "recorded DNS association" : ip_addr_scope(&row->key.remote_ip) != IP_SCOPE_NONE ? "address-range label (not DNS)" : "unknown");
+
+            if (ip_addr_scope(&row->key.remote_ip) != IP_SCOPE_NONE) {
+                snprintf(content[count++], 320, "Address info: %s", ip_scope_description(ip_addr_scope(&row->key.remote_ip)));
+            }
 
             if (state->focus == 0) {
                 char down[20];
@@ -803,6 +817,13 @@ int tui_screen_key(int key, const struct tui_snapshot *snapshot,
                              : state->focus == 0 ? snapshot->live[index].name : snapshot->top[index].name;
 
             lines += name_line_count(name) - 1;
+
+            const struct ip_addr *remote = state->focus == 3 ? &snapshot->endpoints[index].ip
+                : state->focus == 0 ? &snapshot->live[index].key.remote_ip : &snapshot->top[index].key.remote_ip;
+
+            if (ip_addr_scope(remote) != IP_SCOPE_NONE) {
+                lines++;
+            }
         }
 
         const int visible = (LINES < 23 ? LINES - 4 : 19) - 3;

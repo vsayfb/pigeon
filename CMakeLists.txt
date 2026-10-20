@@ -270,3 +270,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(test_app_debug PRIVATE -Wl,--wrap=app_snapshot_read)
     add_test(NAME app_debug COMMAND test_app_debug)
 endif()
+
+add_executable(test_address_scope tests/unit/test_address_scope.c)
+target_link_libraries(test_address_scope PRIVATE pigeon_core)
+add_test(NAME address_scope COMMAND test_address_scope)

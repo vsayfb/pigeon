@@ -481,3 +481,11 @@ must fit the 107-byte Unix socket pathname limit. The socket is removed on norma
 shutdown; an owned stale socket is recovered after a crash. A second collector
 using the same control socket is rejected. No control socket is used for offline
 replay.
+
+Unnamed loopback endpoints display **This device** in the TUI. Private,
+link-local, locally scoped multicast, and limited broadcast endpoints display
+**Local network**. Public unnamed endpoints keep `-`, and observed DNS names
+always take precedence. Exact IP addresses remain visible. These labels are
+presentation-only address-range classifications, not DNS names or proof that
+a peer is on the current interface's subnet; private VPN networks can qualify.
+Details show the range classification. Neither SQLite nor packet tracking changes.

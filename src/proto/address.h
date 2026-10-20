@@ -31,4 +31,21 @@ size_t ip_addr_size(const struct ip_addr *address);
 int ip_addr_equal(const struct ip_addr *a, const struct ip_addr *b);
 uint32_t ip_addr_hash(const struct ip_addr *address);
 
+/* Presentation classification only: does not prove that a peer is on the
+ * selected interface's subnet. Mapped IPv6 is classified by its IPv4 address
+ * without changing address identity. Public/unspecified/reserved addresses
+ * and globally scoped multicast receive no Local network label. */
+enum ip_scope {
+    IP_SCOPE_NONE,
+    IP_SCOPE_PRIVATE,
+    IP_SCOPE_LINK_LOCAL,
+    IP_SCOPE_LOOPBACK,
+    IP_SCOPE_LOCAL_MULTICAST,
+    IP_SCOPE_BROADCAST
+};
+
+enum ip_scope ip_addr_scope(const struct ip_addr *address);
+const char *ip_scope_description(enum ip_scope scope);
+const char *ip_scope_label(enum ip_scope scope);
+
 #endif

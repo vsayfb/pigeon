@@ -66,3 +66,77 @@ uint32_t ip_addr_hash(const struct ip_addr *address) {
 uint32_t ip_addr_v4_value(const struct ip_addr *address) {
     return address->family == 4 ? be32(address->bytes) : 0;
 }
+
+enum ip_scope ip_addr_scope(const struct ip_addr *address) {
+    if (address->family == 4) {
+        const uint8_t *b = address->bytes;
+
+        if (b[0] == 10 || (b[0] == 172 && (b[1] & 0xf0) == 16) ||
+            (b[0] == 192 && b[1] == 168)) {
+            return IP_SCOPE_PRIVATE;
+        }
+
+        if (b[0] == 127) {
+            return IP_SCOPE_LOOPBACK;
+        }
+
+        if (b[0] == 169 && b[1] == 254) {
+            return IP_SCOPE_LINK_LOCAL;
+        }
+
+        if ((b[0] == 224 && b[1] == 0 && b[2] == 0) || b[0] == 239) {
+            return IP_SCOPE_LOCAL_MULTICAST;
+        }
+
+        return ip_addr_v4_value(address) == UINT32_MAX ? IP_SCOPE_BROADCAST : IP_SCOPE_NONE;
+    }
+
+    if (address->family != 6) {
+        return IP_SCOPE_NONE;
+    }
+
+    const uint8_t *b = address->bytes;
+    static const uint8_t loopback[16] = { [15] = 1 };
+    static const uint8_t mapped[12] = { [10] = 255, [11] = 255 };
+
+    if (memcmp(b, mapped, sizeof mapped) == 0) {
+        const struct ip_addr v4 = ip_addr_v4(be32(b + 12));
+
+        return ip_addr_scope(&v4);
+    }
+
+    if (memcmp(b, loopback, sizeof loopback) == 0) {
+        return IP_SCOPE_LOOPBACK;
+    }
+
+    if ((b[0] & 0xfe) == 0xfc) {
+        return IP_SCOPE_PRIVATE;
+    }
+
+    if (b[0] == 0xfe && (b[1] & 0xc0) == 0x80) {
+        return IP_SCOPE_LINK_LOCAL;
+    }
+
+    const unsigned scope = b[1] & 0x0f;
+
+    if (b[0] == 0xff && (scope == 1 || scope == 2 || scope == 3 || scope == 4 || scope == 5 || scope == 8)) {
+        return IP_SCOPE_LOCAL_MULTICAST;
+    }
+
+    return IP_SCOPE_NONE;
+}
+
+const char *ip_scope_description(enum ip_scope scope) {
+    switch (scope) {
+        case IP_SCOPE_PRIVATE: return "Private address range (may include VPN networks)";
+        case IP_SCOPE_LINK_LOCAL: return "Link-local address range";
+        case IP_SCOPE_LOOPBACK: return "Loopback address (this device)";
+        case IP_SCOPE_LOCAL_MULTICAST: return "Locally scoped multicast address";
+        case IP_SCOPE_BROADCAST: return "Local broadcast address";
+        default: return "";
+    }
+}
+
+const char *ip_scope_label(enum ip_scope scope) {
+    return scope == IP_SCOPE_LOOPBACK ? "This device" : scope != IP_SCOPE_NONE ? "Local network" : "";
+}
