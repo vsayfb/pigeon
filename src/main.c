@@ -25,6 +25,7 @@ struct capture_context {
     unsigned long count;
 
     int verbose;
+    int debug_attribution;
     int failed;
 
     struct flow *flows;
@@ -250,6 +251,8 @@ int main(const int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--verbose") == 0) {
             context.verbose = 1;
+        } else if (strcmp(argv[i], "--debug-attribution") == 0) {
+            context.debug_attribution = 1;
         } else if (strcmp(argv[i], "--db") == 0 &&
                    database_path == NULL && i + 1 < argc) {
             database_path = argv[++i];
@@ -268,9 +271,9 @@ int main(const int argc, char **argv) {
         }
     }
 
-    if (invalid || (local_count != 0 && !offline) ||
+    if (invalid || (offline && context.debug_attribution) || (local_count != 0 && !offline) ||
         (database_path != NULL && offline && local_count == 0)) {
-        fprintf(stderr, "pigeon %s\nusage: %s [--verbose] [--db <path>] [interface]\n"
+        fprintf(stderr, "pigeon %s\nusage: %s [--verbose] [--debug-attribution] [--db <path>] [interface]\n"
                         "       %s [--verbose] [--db <path>] [--local-ip <IP> ...] -r <file.pcap>\n",
                 PIGEON_VERSION, argv[0], argv[0]);
 
@@ -371,6 +374,7 @@ int main(const int argc, char **argv) {
             if (context.applications == NULL) {
                 perror("application attribution unavailable");
             } else {
+                app_resolver_set_debug(context.applications, context.debug_attribution);
                 flow_set_application_resolver(context.flows, app_resolver_lookup, context.applications);
             }
         }

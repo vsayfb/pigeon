@@ -4,6 +4,7 @@
 #include <stddef.h>
 
 #include "flow/flow_key.h"
+#include "proto/quic.h"
 
 #define FLOW_NAME_LEN 254
 
@@ -118,5 +119,9 @@ struct udp_view;
 int flow_entry_quic(const struct flow_entry *entry);
 void flow_entry_observe_quic(struct flow_entry *entry, const struct udp_view *udp,
                               uint16_t local_port, int outgoing, int64_t now);
+
+/* Imports metadata from deferred per-socket accounting, retaining the newest
+ * probe and never clearing a confirmed QUIC classification. */
+void flow_entry_merge_quic(struct flow_entry *entry, int quic, const struct quic_probe *probe);
 
 #endif

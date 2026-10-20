@@ -287,3 +287,12 @@ void flow_entry_observe_quic(struct flow_entry *entry, const struct udp_view *ud
         entry->quic = 1;
     }
 }
+
+void flow_entry_merge_quic(struct flow_entry *entry, int quic, const struct quic_probe *probe) {
+    entry->quic |= quic;
+
+    if (!entry->quic && probe->active &&
+        (!entry->quic_probe.active || probe->seen >= entry->quic_probe.seen)) {
+        entry->quic_probe = *probe;
+    }
+}

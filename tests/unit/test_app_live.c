@@ -23,6 +23,16 @@ static void check_owner(struct app_snapshot *snapshot, struct flow_key *key, uin
 
     app_snapshot_lookup(snapshot, key, port, application);
     CHECK(strcmp(application, "test_app_live") == 0);
+
+    int cookie_seen = 0;
+
+    for (size_t i = 0; i < snapshot->count; i++) {
+        if (snapshot->sockets[i].local_port == port && snapshot->sockets[i].cookie_valid) {
+            cookie_seen = 1;
+        }
+    }
+
+    CHECK(cookie_seen);
 }
 
 static void test_local_sockets(int family) {

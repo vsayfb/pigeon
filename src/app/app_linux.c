@@ -49,6 +49,9 @@ static int append_socket(struct app_snapshot *snapshot, const struct inet_diag_m
     socket->remote_port = ntohs(message->id.idiag_dport);
     socket->protocol = protocol;
     socket->inode = message->idiag_inode;
+    socket->cookie = ((uint64_t)message->id.idiag_cookie[1] << 32) | message->id.idiag_cookie[0];
+    socket->cookie_valid = message->id.idiag_cookie[0] != INET_DIAG_NOCOOKIE ||
+                           message->id.idiag_cookie[1] != INET_DIAG_NOCOOKIE;
 
     /* A dual-stack TCP connection may be reported as IPv4-mapped IPv6. */
     static const unsigned char mapped[12] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 255, 255 };

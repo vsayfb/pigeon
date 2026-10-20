@@ -156,6 +156,7 @@ static int run_screen(struct tui_reader *reader, struct tui_snapshot *snapshot,
             char query_error[TUI_ERROR_LEN];
 
             if (tui_reader_refresh(reader, &options, (int64_t)wall, monotonic, next, query_error) == 0) {
+                tui_screen_hold_list(snapshot, next, &state);
                 tui_screen_reselect(snapshot, next, &state);
                 *snapshot = *next;
                 error[0] = '\0';
@@ -174,6 +175,7 @@ static int run_screen(struct tui_reader *reader, struct tui_snapshot *snapshot,
 
         if (action_flags & TUI_KEY_INTERFACES) {
             tui_interfaces(path, &stopping);
+            state.browsing = 0;
             forced_refresh = 1;
         }
 

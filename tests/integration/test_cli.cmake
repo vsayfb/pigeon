@@ -81,3 +81,9 @@ execute_process(COMMAND "${PIGEON}" --local-ip 192.0.2.10
 if(NOT rc EQUAL 2 OR NOT errors MATCHES "usage:")
     message(FATAL_ERROR "Live local-address override was accepted: ${errors}")
 endif()
+
+execute_process(COMMAND "${PIGEON}" --debug-attribution -r "${FIXTURE}"
+    RESULT_VARIABLE rc OUTPUT_VARIABLE output ERROR_VARIABLE errors)
+if(NOT rc EQUAL 2 OR NOT errors MATCHES "usage:")
+    message(FATAL_ERROR "Offline attribution diagnostics were accepted: ${rc}: ${errors}")
+endif()

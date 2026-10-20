@@ -97,6 +97,30 @@ processes. Exact connections take precedence over unconnected UDP bindings.
 IPv4, IPv6, and connected IPv4-mapped IPv6 sockets are supported. Sampling is
 bounded to 131,072 sockets and 262,144 file descriptors; incomplete/failed
 samples are discarded, and samples older than three seconds are not used.
+Confirmed ownership is cached in memory for up to five seconds across transient
+owner-scan misses, only while the same kernel socket cookie, inode, address
+family, protocol, addresses and ports remain present. Cache hits do not extend
+that deadline. Conflicting/ambiguous ownership, a changed socket identity, or a
+missing socket prevents reuse; newly confirmed ownership takes precedence.
+A failed background sample may use the last successful snapshot only until its
+original three-second freshness deadline. This reduces future attribution
+splits without reassigning historical unresolved records, changing conversation
+keys, or adding process details to SQLite. First packets and sockets whose
+owners are never observed can still be unresolved.
+
+Initially unresolved live TCP/UDP accounting is held in memory for up to three
+seconds, keyed by both IP addresses, both ports, and transport protocol. The
+collector retries the cached ownership lookup on maintenance ticks and when a
+later packet has a known owner. If it resolves in time, the held counters enter
+that application's conversation; otherwise they enter the unresolved group.
+Additional packets do not extend the original deadline. The queue holds at most
+1,024 socket tuples; capacity pressure commits the oldest early. It retains only
+counters, timestamps, DNS names, and bounded QUIC evidence, never packet payloads.
+Explicit flushes, shutdown, and interface switches drain the queue immediately.
+This can delay new rows/rate updates by a few seconds. It is best-effort tuple
+correlation, not a kernel event history: extremely short-lived or rapidly reused
+sockets can still defeat attribution. No existing SQLite rows are reassigned,
+and offline replay and captures without an ownership resolver remain immediate.
 
 An empty stored application is displayed as `unresolved`. This includes old
 records, offline replays, inaccessible owners, missed short-lived sockets, and
@@ -112,6 +136,30 @@ container namespaces. Executable basenames are labels, so unrelated binaries
 with the same basename combine. Interpreted programs may appear as `python3`,
 and a browser's subprocesses use their executable names. No attempt is made to
 infer the originating application behind a proxy, VPN, or local resolver.
+
+### Attribution diagnostics
+
+Stop the current collector, then run:
+
+```sh
+sudo ./build/pigeon --debug-attribution 2> /tmp/pigeon-attribution.log
+```
+
+This live-only flag writes socket-level diagnostic samples to stderr without
+requiring verbose packet dumps. Each line includes local and remote addresses
+and ports, the IP protocol number, application, lookup result, snapshot age,
+and the last sampler error number (`sample_errno=0` means the last sample
+succeeded). It logs lookups, including retries, rather than packet/byte counts.
+
+Results are `snapshot` (fresh ownership scan), `cache` (retained ownership),
+`no-snapshot` (sampler has not published a successful result), `stale-snapshot`,
+`no-matching-socket`, `owner-missing` (matching socket but no usable executable
+owner), `ambiguous-owners`, `owner-cache-expired`, or `clock-error`. A missing
+socket or owner does not by itself prove a permission problem; it may have
+closed between observations. Repeated tuple/result combinations are suppressed
+for five seconds; output is limited to 20 detail lines per second, with a
+`rate-limited` summary when further messages were suppressed. This is diagnostic
+sampling, not a complete event audit. No process details are added to SQLite.
 
 ### Terminal viewer
 
@@ -147,7 +195,8 @@ fit at 110 columns by 26 rows. Lists show at most 200 matches.
 | Key | Action |
 | --- | --- |
 | Tab / Shift-Tab | Change panel |
-| Arrows, j/k, PgUp/PgDn, Home/End | Select a row |
+| Up/Down, j/k, PgUp/PgDn, Home/End | Select a row |
+| Left/Right | Scroll conversation columns horizontally |
 | Enter | Show details; on Applications, filter conversations by selected application |
 | d | Show details for the selected entry; Enter/Esc closes |
 | a | Clear the exact application filter |
@@ -157,9 +206,17 @@ fit at 110 columns by 26 rows. Lists show at most 200 matches.
 | l | Sort Live traffic by recency, combined rate, download rate, or upload rate |
 | r | Cycle Live traffic window: 30s, 120s, all recorded, 10s |
 | f / v | Cycle protocol / address-family filters |
+| b | Hold/resume focused list order (navigation holds automatically) |
 | p | Pause automatic refresh |
 | ? | Show help |
 | q / Ctrl-C | Quit viewer |
+
+Navigating a list automatically holds its membership and row order so live
+updates cannot move the selection bar. Matching rows continue receiving updated
+counters, and the other panels keep refreshing. Rows that leave the current live
+sample remain available for inspection with unavailable (`--`) rates. The header
+shows **BROWSING: order held**. Press `b`, switch panels, or change filters/sorting
+to resume normal list membership and ranking. Opening details also holds the list.
 
 Applications ranks cumulative payload totals per executable basename, with a
 separate unresolved group. Use Tab to focus it, select a row, and press Enter to
@@ -177,14 +234,17 @@ rankings controlled by `s`. Rate sorting is descending among the 200 most recent
 conversations matching the current filters/window. Measured rates (including
 zero) precede waiting rows; ties retain recency and deterministic key order.
 The panel title shows the active sort, and selection follows the conversation
-when rankings change. Values are payload bytes per second in the shown unit. The endpoint label includes port/protocol; narrow panels hide the
-Seen column, which remains available in details. Long domain names are
-abbreviated in the middle with `...` to preserve the IP, port, and protocol.
-If space is too limited for a useful name, the label shows only the endpoint;
-if the endpoint itself cannot fit, it also gets an explicit `...` marker.
-New endpoints uses the same rule for domain/IP labels. Details wrap full domain
-names across lines. `--` means that a row is waiting
-for a second sample at least one second later. A measured zero shows `0 B`.
+when rankings change. Rate values include `/s`, for example `0 B/s` or
+`2.0 KiB/s`. Live traffic and Top Conversations use separate Application,
+Domain, IP, Port, and Protocol columns. IP addresses retain their full text;
+long domain and application names are abbreviated with `...`. Left/Right
+scrolls overflowing columns independently in each conversation panel, with
+selection and direction indicators pinned. Narrow panels omit Seen; details
+retain it. Protocols without ports show `-` in the Port column, and classified
+UDP conversations show `QUIC (UDP)` under Protocol.
+New endpoints retains its combined domain/IP labels. Details wrap full domain
+names across lines. `--` means that a row is waiting for a second sample at
+least one second later.
 Only continuously visible rows retain rate baselines: rows that leave and return
 because of filtering, recency, or the 200-row limit start sampling again. Counter
 resets also restart sampling. Rapid refreshes retain the previous estimate;

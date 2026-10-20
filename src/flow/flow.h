@@ -37,10 +37,21 @@ void flow_destroy(struct flow *flow);
  * Without either sink it fails with ENOSPC. A failed write or handler
  * preserves the entry and rejects the new observation.
  *
- * Returns 1 for an observed conversation, 0 for an ignored packet, or -1
+ * With a live ownership resolver, unresolved TCP/UDP accounting waits up to
+ * three seconds per full socket tuple for another ownership sample. Counters
+ * and QUIC evidence are retained without packet payloads, capped at 1024 tuples.
+ * The oldest pending tuple is committed early if that cap is reached. Explicit
+ * flow_flush retries and commits all pending accounting, including on shutdown
+ * and source switches. Offline/no-resolver behavior is immediate.
+ *
+ * Returns 1 for an observed conversation (including deferred accounting), 0 for an ignored packet, or -1
  * with errno set on allocation or handoff failure, leaving the tracker unchanged.
  */
 int flow_observe(struct flow *flow, const struct packet_view *packet, int64_t now);
+
+/* Returns deferred full socket tuples awaiting attribution (at most 1024).
+ * These are not yet included in flow_count/flow_visit/flow_find. */
+size_t flow_pending_count(const struct flow *flow);
 
 /* Returns the number of conversations currently held by the tracker. */
 size_t flow_count(const struct flow *flow);

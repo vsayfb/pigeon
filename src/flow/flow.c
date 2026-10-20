@@ -1,10 +1,28 @@
 #include "flow/flow.h"
 #include "store/store.h"
 #include "dns/dns_cache.h"
+#include "proto/quic.h"
 
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+
+#define ATTRIBUTION_BUCKETS 256
+#define ATTRIBUTION_CAPACITY 1024
+#define ATTRIBUTION_WAIT_SECONDS 3
+
+struct pending_attribution {
+    struct flow_key key;       /* application remains empty until commit */
+    uint16_t local_port;
+    struct flow_delta delta;
+    char name[FLOW_NAME_LEN];
+    struct quic_probe probe;
+    int quic;
+    int64_t queued_at;
+    struct pending_attribution *bucket_next;
+    struct pending_attribution *older;
+    struct pending_attribution *newer;
+};
 
 struct flow {
     struct ip_addr *local_addresses;
@@ -22,6 +40,10 @@ struct flow {
     int clock_set;
     void (*resolve_application)(const struct flow_key *, uint16_t, char [FLOW_APP_LEN], void *);
     void *application_user;
+    struct pending_attribution *pending[ATTRIBUTION_BUCKETS];
+    struct pending_attribution *pending_oldest;
+    struct pending_attribution *pending_newest;
+    size_t pending_count;
 };
 
 static const char *lookup_name(const struct flow *flow, const struct flow_entry *entry) {
@@ -141,6 +163,9 @@ struct flow *flow_create_addresses(const struct ip_addr *addresses, size_t count
     flow->clock_set = 0;
     flow->resolve_application = NULL;
     flow->application_user = NULL;
+    memset(flow->pending, 0, sizeof flow->pending);
+    flow->pending_oldest = flow->pending_newest = NULL;
+    flow->pending_count = 0;
 
     flow_table_set_eviction_handler(flow->table, handoff_eviction, flow);
 
@@ -152,9 +177,238 @@ void flow_destroy(struct flow *flow) {
         return;
     }
 
+    while (flow->pending_oldest != NULL) {
+        struct pending_attribution *next = flow->pending_oldest->newer;
+
+        free(flow->pending_oldest);
+        flow->pending_oldest = next;
+    }
+
     flow_table_destroy(flow->table);
     free(flow->local_addresses);
     free(flow);
+}
+
+static size_t pending_bucket(const struct flow_key *key, uint16_t local_port) {
+    return (flow_key_hash(key) ^ local_port) % ATTRIBUTION_BUCKETS;
+}
+
+static struct pending_attribution *pending_find(struct flow *flow, const struct flow_key *key,
+                                                uint16_t local_port) {
+    struct flow_key unowned = *key;
+
+    unowned.application[0] = '\0';
+
+    for (struct pending_attribution *pending = flow->pending[pending_bucket(&unowned, local_port)];
+         pending != NULL; pending = pending->bucket_next) {
+        if (pending->local_port == local_port && flow_key_equal(&pending->key, &unowned)) {
+            return pending;
+        }
+    }
+
+    return NULL;
+}
+
+static void pending_remove(struct flow *flow, struct pending_attribution *pending) {
+    const size_t bucket = pending_bucket(&pending->key, pending->local_port);
+    struct pending_attribution **link = &flow->pending[bucket];
+
+    while (*link != pending) {
+        link = &(*link)->bucket_next;
+    }
+
+    *link = pending->bucket_next;
+
+    if (pending->older != NULL) {
+        pending->older->newer = pending->newer;
+    } else {
+        flow->pending_oldest = pending->newer;
+    }
+
+    if (pending->newer != NULL) {
+        pending->newer->older = pending->older;
+    } else {
+        flow->pending_newest = pending->older;
+    }
+
+    flow->pending_count--;
+    free(pending);
+}
+
+static int pending_commit(struct flow *flow, struct pending_attribution *pending,
+                           const char *application) {
+    struct flow_key key = pending->key;
+
+    memcpy(key.application, application, strlen(application) + 1);
+
+    struct flow_entry *entry = flow_table_find(flow->table, &key);
+    const int is_new = entry == NULL;
+
+    if (entry == NULL) {
+        entry = flow_table_insert(flow->table, &key);
+
+        if (entry == NULL) {
+            return -1;
+        }
+    }
+
+    struct flow_delta delta = *flow_entry_delta(entry);
+
+    delta.packets_out += pending->delta.packets_out;
+    delta.packets_in += pending->delta.packets_in;
+    delta.bytes_out += pending->delta.bytes_out;
+    delta.bytes_in += pending->delta.bytes_in;
+
+    if (is_new || pending->delta.first_seen < delta.first_seen) {
+        delta.first_seen = pending->delta.first_seen;
+    }
+
+    if (is_new || pending->delta.last_seen > delta.last_seen) {
+        delta.last_seen = pending->delta.last_seen;
+    }
+
+    flow_entry_set_delta(entry, &delta);
+
+    if (flow_entry_name(entry)[0] == '\0' && pending->name[0] != '\0') {
+        flow_entry_set_name(entry, pending->name);
+    }
+
+    flow_entry_merge_quic(entry, pending->quic, &pending->probe);
+    flow_table_touch(flow->table, &key);
+    pending_remove(flow, pending);
+
+    return 0;
+}
+
+static void pending_resolve(const struct flow *flow, const struct pending_attribution *pending,
+                             char application[FLOW_APP_LEN]) {
+    application[0] = '\0';
+
+    if (flow->resolve_application != NULL) {
+        flow->resolve_application(&pending->key, pending->local_port, application, flow->application_user);
+        application[FLOW_APP_LEN - 1] = '\0';
+    }
+}
+
+static int pending_expired(const struct pending_attribution *pending, int64_t now) {
+    return now < pending->queued_at || (uint64_t)now - (uint64_t)pending->queued_at >= ATTRIBUTION_WAIT_SECONDS;
+}
+
+static int pending_can_retry(const struct pending_attribution *pending, int64_t now) {
+    return now >= pending->queued_at && (uint64_t)now - (uint64_t)pending->queued_at <= ATTRIBUTION_WAIT_SECONDS;
+}
+
+static int pending_drain(struct flow *flow, int64_t now, int force) {
+    struct pending_attribution *pending = flow->pending_oldest;
+
+    while (pending != NULL) {
+        struct pending_attribution *next = pending->newer;
+        char application[FLOW_APP_LEN] = "";
+
+        if (pending_can_retry(pending, now)) {
+            pending_resolve(flow, pending, application);
+        }
+
+        if ((application[0] != '\0' || force || pending_expired(pending, now)) &&
+            pending_commit(flow, pending, application) == -1) {
+            return -1;
+        }
+
+        pending = next;
+    }
+
+    return 0;
+}
+
+static int pending_observe(struct flow *flow, const struct flow_key *key, uint16_t local_port,
+                            const struct packet_view *packet, int outgoing, int64_t now) {
+    struct pending_attribution *pending = pending_find(flow, key, local_port);
+
+    if (pending != NULL && pending_expired(pending, now)) {
+        if (pending_commit(flow, pending, "") == -1) {
+            return -1;
+        }
+
+        pending = NULL;
+    }
+
+    if (pending == NULL) {
+        /* Allocate before forcing out the oldest tuple so allocation failures
+         * cannot change existing accounting. Capacity pressure never drops it. */
+        pending = calloc(1, sizeof *pending);
+
+        if (pending == NULL) {
+            return -1;
+        }
+
+        if (flow->pending_count == ATTRIBUTION_CAPACITY) {
+            char application[FLOW_APP_LEN] = "";
+
+            if (pending_can_retry(flow->pending_oldest, now)) {
+                pending_resolve(flow, flow->pending_oldest, application);
+            }
+
+            if (pending_commit(flow, flow->pending_oldest, application) == -1) {
+                free(pending);
+
+                return -1;
+            }
+        }
+
+        pending->key = *key;
+        pending->local_port = local_port;
+        pending->queued_at = now;
+        pending->delta.first_seen = pending->delta.last_seen = now;
+        pending->older = flow->pending_newest;
+
+        if (flow->pending_newest != NULL) {
+            flow->pending_newest->newer = pending;
+        } else {
+            flow->pending_oldest = pending;
+        }
+
+        flow->pending_newest = pending;
+
+        const size_t bucket = pending_bucket(key, local_port);
+
+        pending->bucket_next = flow->pending[bucket];
+        flow->pending[bucket] = pending;
+        flow->pending_count++;
+    }
+
+    const size_t payload = packet->kind == PACKET_TCP ? packet->transport.tcp.payload_wire_len
+                                                     : packet->transport.udp.payload_wire_len;
+
+    if (outgoing) {
+        pending->delta.packets_out++;
+        pending->delta.bytes_out += payload;
+    } else {
+        pending->delta.packets_in++;
+        pending->delta.bytes_in += payload;
+    }
+
+    if (now < pending->delta.first_seen) {
+        pending->delta.first_seen = now;
+    }
+
+    if (now > pending->delta.last_seen) {
+        pending->delta.last_seen = now;
+    }
+
+    if (flow->dns != NULL && pending->name[0] == '\0') {
+        const char *name = dns_cache_lookup(flow->dns, key->remote_ip, now);
+
+        if (name != NULL) {
+            memcpy(pending->name, name, strlen(name) + 1);
+        }
+    }
+
+    if (packet->kind == PACKET_UDP && !pending->quic) {
+        pending->quic = quic_observe(&pending->probe, packet->transport.udp.payload,
+            packet->transport.udp.payload_len, packet->transport.udp.payload_wire_len, local_port, outgoing, now);
+    }
+
+    return 1;
 }
 
 int flow_observe(struct flow *flow, const struct packet_view *packet, int64_t now) {
@@ -214,6 +468,21 @@ int flow_observe(struct flow *flow, const struct packet_view *packet, int64_t no
 
     flow->name_time = now;
     flow->clock_set = 1;
+
+    if (!icmp && !esp && flow->resolve_application != NULL) {
+        const uint16_t local_port = outgoing ? source_port : destination_port;
+
+        if (key.application[0] == '\0') {
+            return pending_observe(flow, &key, local_port, packet, outgoing, now);
+        }
+
+        struct pending_attribution *pending = pending_find(flow, &key, local_port);
+
+        if (pending != NULL && pending_commit(flow, pending,
+            pending_can_retry(pending, now) ? key.application : "") == -1) {
+            return -1;
+        }
+    }
 
     struct flow_entry *entry = flow_table_find(flow->table, &key);
     const int is_new = entry == NULL;
@@ -303,7 +572,7 @@ void flow_set_store(struct flow *flow, struct store *store) {
     flow->store = store;
 }
 
-int flow_flush(struct flow *flow) {
+static int flush_table(struct flow *flow) {
     if (flow->store == NULL) {
         errno = ENOSYS;
 
@@ -371,18 +640,36 @@ int flow_flush(struct flow *flow) {
     return 0;
 }
 
+int flow_flush(struct flow *flow) {
+    if (flow->store == NULL) {
+        errno = ENOSYS;
+
+        return -1;
+    }
+
+    if (pending_drain(flow, flow->name_time, 1) == -1) {
+        return -1;
+    }
+
+    return flush_table(flow);
+}
+
+size_t flow_pending_count(const struct flow *flow) {
+    return flow->pending_count;
+}
+
 int flow_tick(struct flow *flow, int64_t now) {
     flow->name_time = now;
     flow->clock_set = 1;
 
     if (flow->tick_started && now <= flow->last_tick) {
-        return 0;
+        return now < flow->last_tick ? pending_drain(flow, now, 0) : 0;
     }
 
     flow->tick_started = 1;
     flow->last_tick = now;
 
-    if (flow_flush(flow) == -1) {
+    if (pending_drain(flow, now, 0) == -1 || flush_table(flow) == -1) {
         return -1;
     }
 

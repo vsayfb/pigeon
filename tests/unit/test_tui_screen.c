@@ -49,8 +49,10 @@ static void test_endpoint_abbreviations(void) {
     strcpy(snapshot->endpoints[0].name, long_name);
 
     tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
-    CHECK(columns_contain(0, 90, " -> 173.194.10.38:65535/tcp"));
-    CHECK(columns_contain(90, 90, " -> 173.194.10.38:65535/tcp"));
+    CHECK(columns_contain(0, 90, "Application"));
+    CHECK(columns_contain(0, 90, "unresolved"));
+    CHECK(columns_contain(0, 90, "173.194.10.38"));
+    CHECK(columns_contain(90, 90, "173.194.10.38"));
     CHECK(columns_contain(0, 90, "..."));
     CHECK(columns_contain(90, 90, "..."));
     CHECK(contains(" -> 173.194.10.38"));
@@ -65,13 +67,13 @@ static void test_endpoint_abbreviations(void) {
     CHECK(ip_addr_parse("2001:db8::42", &snapshot->live[0].key.remote_ip) == 0);
     snapshot->top[0] = snapshot->live[0];
     tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
-    CHECK(columns_contain(0, 90, " -> [2001:db8::42]:65535/tcp"));
-    CHECK(columns_contain(90, 90, " -> [2001:db8::42]:65535/tcp"));
+    CHECK(columns_contain(0, 90, "2001:db8::42"));
+    CHECK(columns_contain(90, 90, "2001:db8::42"));
 
     snapshot->live[0].name[0] = '\0';
     snapshot->top[0] = snapshot->live[0];
     tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
-    CHECK(columns_contain(0, 90, "[2001:db8::42]:65535/tcp"));
+    CHECK(columns_contain(0, 90, "2001:db8::42"));
     CHECK(!columns_contain(0, 90, " -> "));
 
     CHECK(ip_addr_parse("ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", &snapshot->live[0].key.remote_ip) == 0);
@@ -79,7 +81,24 @@ static void test_endpoint_abbreviations(void) {
     CHECK(resizeterm(16, 60) == OK);
     tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
     CHECK(contains("..."));
-    CHECK(contains(":65535/tcp"));
+    const int before_scroll = state.column_scroll[0];
+
+    for (int i = 0; i < 12; i++) {
+        tui_screen_key(KEY_RIGHT, snapshot, &options, &state);
+    }
+
+    CHECK(state.column_scroll[0] > before_scroll);
+    CHECK(state.column_scroll[1] == 0);
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK(contains("TCP"));
+    CHECK(contains("Port"));
+    CHECK(contains("65535"));
+
+    for (int i = 0; i < 12; i++) {
+        tui_screen_key(KEY_LEFT, snapshot, &options, &state);
+    }
+
+    CHECK(state.column_scroll[0] == 0);
 
     tui_screen_key('d', snapshot, &options, &state);
     tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
@@ -107,6 +126,58 @@ static void check_direction_icon(int y, int x, wchar_t expected, short expected_
     CHECK(value[0] == expected);
     CHECK((attributes & A_BOLD) != 0);
     CHECK(pair == expected_pair);
+}
+
+static void test_browsing_selection(void) {
+    struct tui_snapshot *old = calloc(1, sizeof *old);
+    struct tui_snapshot *next = calloc(1, sizeof *next);
+    struct tui_options options = { .recent_seconds = 30 };
+    struct tui_screen state = { 0 };
+
+    CHECK(old != NULL && next != NULL);
+    old->live_count = 3;
+
+    for (size_t i = 0; i < 3; i++) {
+        old->live[i].key.us_ip = ip_addr_v4(0xc000020a);
+        old->live[i].key.remote_ip = ip_addr_v4(0xc6336414);
+        old->live[i].key.protocol = 6;
+        old->live[i].key.remote_port = (uint16_t)(80 + i);
+        old->live[i].rates_valid = 1;
+    }
+
+    tui_screen_key(KEY_DOWN, old, &options, &state);
+    CHECK(state.browsing && state.selected[0] == 1);
+    next->live_count = 2;
+    next->live[0] = old->live[1];
+    next->live[0].totals.bytes_in = 1234;
+    next->live[0].rate_down = 25;
+    next->live[1] = old->live[0];
+    next->top_count = 7;
+    next->bytes_down = 9000;
+    tui_screen_hold_list(old, next, &state);
+    tui_screen_reselect(old, next, &state);
+    CHECK(next->live_count == 3 && state.selected[0] == 1);
+    CHECK(next->live[1].key.remote_port == 81);
+    CHECK(next->live[1].totals.bytes_in == 1234 && next->live[1].rate_down == 25);
+    CHECK(next->live[1].rates_valid);
+    CHECK(!next->live[2].rates_valid);
+    CHECK(next->top_count == 7 && next->bytes_down == 9000);
+
+    CHECK(tui_screen_key('b', next, &options, &state) == TUI_KEY_REFRESH);
+    CHECK(!state.browsing);
+    next->live_count = 1;
+    tui_screen_hold_list(old, next, &state);
+    CHECK(next->live_count == 1);
+    tui_screen_key(KEY_DOWN, old, &options, &state);
+    CHECK(state.browsing);
+    CHECK(tui_screen_key('\t', old, &options, &state) == TUI_KEY_REFRESH);
+    CHECK(!state.browsing && state.focus == 1);
+    tui_screen_key(KEY_DOWN, old, &options, &state);
+    tui_screen_key('s', old, &options, &state);
+    CHECK(!state.browsing);
+
+    free(old);
+    free(next);
 }
 
 static void test_row_directions(void) {
@@ -176,6 +247,11 @@ static void test_ascii_icons(void) {
     snapshot->live_count = 2;
     snapshot->live[0].totals.packets_in = snapshot->live[0].totals.packets_out = 1;
     snapshot->live[1].totals.packets_out = 1;
+
+    for (int i = 0; i < 12; i++) {
+        tui_screen_key(KEY_RIGHT, snapshot, &options, &state);
+    }
+
     tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
     CHECK((mvwinch(curscr, 10, 3) & A_CHARTEXT) == 'v');
     CHECK((mvwinch(curscr, 10, 4) & A_CHARTEXT) == '^');
@@ -235,8 +311,8 @@ int main(void) {
     check_direction_icon(3, 22, L'\u2191', 2);
     check_direction_icon(5, 2, L'\u2193', 1);
     check_direction_icon(6, 2, L'\u2191', 2);
-    check_direction_icon(9, 63, L'\u2193', 1);
-    check_direction_icon(9, 76, L'\u2191', 2);
+    check_direction_icon(9, 67, L'\u2193', 1);
+    check_direction_icon(9, 82, L'\u2191', 2);
     CHECK(contains("Live traffic"));
     CHECK(contains("Top Conversations"));
     CHECK(contains("New endpoints"));
@@ -245,21 +321,30 @@ int main(void) {
     CHECK(contains("Down/s"));
     CHECK(contains("Up/s"));
     CHECK(contains("--"));
-    CHECK(contains("v6.test -> [2001:db8::42]:443/tcp"));
+    CHECK(columns_contain(0, 90, "v6.test"));
+    CHECK(columns_contain(0, 90, "2001:db8::42"));
+    CHECK(columns_contain(0, 90, "Domain"));
+    CHECK(columns_contain(0, 90, "IP"));
+    CHECK(columns_contain(0, 90, "Port"));
+    CHECK(columns_contain(0, 90, "Protocol"));
+    CHECK(columns_contain(0, 90, "443"));
+    CHECK(columns_contain(0, 90, "TCP"));
     snapshot->live[0].key.protocol = 17;
     snapshot->live[0].quic = 1;
     tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
-    CHECK(columns_contain(0, 90, "/QUIC(UDP)"));
+    CHECK(columns_contain(0, 90, "QUIC (UDP)"));
     snapshot->live[0].quic = 0;
 
     snapshot->live[0].key.protocol = 58;
     snapshot->live[0].key.remote_port = 0;
     tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
-    CHECK(columns_contain(0, 90, "/icmpv6"));
+    CHECK(columns_contain(0, 90, "ICMPv6"));
+    CHECK((mvwinch(curscr, 10, 50) & A_CHARTEXT) == '-');
     CHECK(!columns_contain(0, 90, ":0/"));
     snapshot->live[0].key.protocol = 50;
     tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
-    CHECK(columns_contain(0, 90, "/esp"));
+    CHECK(columns_contain(0, 90, "ESP"));
+    CHECK((mvwinch(curscr, 10, 50) & A_CHARTEXT) == '-');
     CHECK(!columns_contain(0, 90, ":0/"));
     options.protocol = 17;
     CHECK(tui_screen_key('f', snapshot, &options, &state) == TUI_KEY_REFRESH);
@@ -304,7 +389,7 @@ int main(void) {
     }
 
     CHECK(options.live_sort == TUI_LIVE_RECENCY);
-    CHECK(tui_screen_key('\t', snapshot, &options, &state) == 0);
+    CHECK(tui_screen_key('\t', snapshot, &options, &state) == TUI_KEY_REFRESH);
     CHECK(state.focus == 1);
     CHECK(tui_screen_key('s', snapshot, &options, &state) == TUI_KEY_REFRESH);
     CHECK(options.sort == TUI_SORT_DOWNLOAD);
@@ -327,12 +412,22 @@ int main(void) {
 
     state.focus = 0;
     snapshot->live[0].rates_valid = 1;
+
+    for (int i = 0; i < 12; i++) {
+        tui_screen_key(KEY_RIGHT, snapshot, &options, &state);
+    }
+
+    snapshot->live[0].rate_down = 0;
+    snapshot->live[0].rate_up = 0;
+    tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
+    CHECK(contains("0 B/s"));
+
     snapshot->live[0].rate_down = 2048;
     snapshot->live[0].rate_up = 512;
     tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
     CHECK(contains("Down/s"));
-    CHECK(contains("2.0 KiB"));
-    CHECK(contains("512 B"));
+    CHECK(contains("2.0 KiB/s"));
+    CHECK(contains("512 B/s"));
     tui_screen_key('d', snapshot, &options, &state);
 
     for (int i = 0; i < 5; i++) {
@@ -345,7 +440,7 @@ int main(void) {
     tui_screen_key(27, snapshot, &options, &state);
     state.focus = 1;
 
-    CHECK(tui_screen_key('\t', snapshot, &options, &state) == 0);
+    CHECK(tui_screen_key('\t', snapshot, &options, &state) == TUI_KEY_REFRESH);
     CHECK(state.focus == 2);
     tui_screen_draw(snapshot, &options, &state, "test.db", "", 1000);
     CHECK(contains("Applications | all recorded"));
@@ -407,6 +502,7 @@ int main(void) {
 
     CHECK(tui_screen_key('i', snapshot, &options, &state) == TUI_KEY_INTERFACES);
 
+    test_browsing_selection();
     test_row_directions();
     test_endpoint_abbreviations();
 

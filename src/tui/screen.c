@@ -285,6 +285,75 @@ static void overview(struct panel p, const struct tui_snapshot *snapshot, int64_
     }
 }
 
+struct conversation_columns {
+    int width[8];
+    int total;
+};
+
+static struct conversation_columns conversation_columns(int panel_width,
+    const struct tui_conversation *rows, size_t count, int live) {
+    struct conversation_columns columns = { .width = {
+        panel_width >= 110 ? 18 : 12, 8, 15, 5, 10,
+        live ? 12 : 10, live ? 12 : 10, live && panel_width >= 110 ? 6 : 0
+    } };
+
+    for (size_t i = 0; i < count; i++) {
+        char address[IP_ADDR_STR_LEN];
+        const int length = (int)strlen(ip_addr_str(&rows[i].key.remote_ip, address));
+
+        if (length > columns.width[2]) {
+            columns.width[2] = length;
+        }
+    }
+
+    for (int i = 0; i < 8; i++) {
+        if (columns.width[i] != 0) {
+            columns.total += columns.width[i] + (i != 0);
+        }
+    }
+
+    const int extra = panel_width - 8 - columns.total;
+
+    if (extra > 0) {
+        const int added = extra < 152 ? extra : 152;
+
+        columns.width[1] += added;
+        columns.total += added;
+    }
+
+    return columns;
+}
+
+/* Clip each cell independently so horizontal scrolling cannot overwrite a
+ * neighboring panel or the pinned selection and direction indicators. */
+static void conversation_cell(struct panel p, int y, int offset, int width,
+                              int scroll, const char *value, int right, int attributes) {
+    char cell[256];
+    const int left = p.x + 6;
+    const int boundary = p.x + p.width - 2;
+    int x = left + offset - scroll;
+    int skip = 0;
+
+    snprintf(cell, sizeof cell, right ? "%*.*s" : "%-*.*s", width, width, value);
+
+    if (x < left) {
+        skip = left - x;
+        x = left;
+    }
+
+    if (skip >= width || x >= boundary) {
+        return;
+    }
+
+    int visible = width - skip;
+
+    if (visible > boundary - x) {
+        visible = boundary - x;
+    }
+
+    text(y, x, visible, attributes, "%s", cell + skip);
+}
+
 static void conversation_panel(struct panel p, const struct tui_snapshot *snapshot,
                                  const struct tui_options *options, const struct tui_screen *state,
                                  int focus, int64_t now) {
@@ -305,49 +374,69 @@ static void conversation_panel(struct panel p, const struct tui_snapshot *snapsh
         snprintf(title, sizeof title, "Top Conversations | all recorded | %s", sorts[options->sort]);
     }
 
+    if (state->browsing && state->focus == focus) {
+        const size_t used = strlen(title);
+
+        snprintf(title + used, sizeof title - used, " | browsing");
+    }
+
     draw_border(p, title, state->focus == focus);
 
-    const int show_seen = live && p.width >= 80;
-    const int application_width = p.width >= (live ? 110 : 80) ? 18 : 12;
-    const int endpoint_width = p.width - 30 - application_width - (show_seen ? 7 : 0);
     const struct tui_conversation *rows = live ? snapshot->live : snapshot->top;
     const size_t count = live ? snapshot->live_count : snapshot->top_count;
+    const struct conversation_columns columns = conversation_columns(p.width, rows, count, live);
+    const int available = p.width - 8;
+    const int maximum = columns.total > available ? columns.total - available : 0;
+    const int scroll = state->column_scroll[focus] < maximum ? state->column_scroll[focus] : maximum;
     const int visible = p.height - 4;
     const size_t selected = state->selected[focus];
     const size_t start = selected >= (size_t)visible ? selected - (size_t)visible + 1 : 0;
+    const char *headings[] = { columns.width[0] >= 11 ? "Application" : "App", "Domain", "IP", "Port", "Protocol",
+                              live ? "Down/s" : "Down", live ? "Up/s" : "Up", "Seen" };
+    int offset = 0;
 
-    text(p.y + 1, p.x + 1, p.width - 2, A_DIM, "  IO %-*s %-*s",
-         application_width, "Application", endpoint_width, "Endpoint");
+    text(p.y + 1, p.x + 3, 2, A_DIM, "IO");
 
-    const int down_x = p.x + 8 + application_width + endpoint_width;
+    for (int column = 0; column < 8; column++) {
+        const int width = columns.width[column];
 
-    traffic_heading(p.y + 1, down_x, live ? "Down/s" : "Down", 1);
-    traffic_heading(p.y + 1, down_x + 11, live ? "Up/s" : "Up", 0);
+        if (width == 0) {
+            continue;
+        }
 
-    if (show_seen) {
-        text(p.y + 1, down_x + 22, 6, A_DIM, "%6s", "Seen");
+        conversation_cell(p, p.y + 1, offset, width, scroll, headings[column], column >= 3 && column != 4, A_DIM);
+
+        if (column == 5 || column == 6) {
+            const int x = p.x + 6 + offset - scroll + width - (int)strlen(headings[column]) - 2;
+
+            if (x >= p.x + 6 && x < p.x + p.width - 2) {
+                direction_icon(p.y + 1, x, column == 5);
+            }
+        }
+
+        offset += width + 1;
     }
 
     for (int i = 0; i < visible && start + (size_t)i < count; i++) {
         const size_t index = start + (size_t)i;
         const struct tui_conversation *row = &rows[index];
         char address[IP_ADDR_STR_LEN];
-        char endpoint[IP_ADDR_STR_LEN + 16];
-        char label[384];
+        char domain[384];
+        char application[384];
+        char port[6] = "-";
         char last[32];
         char down[20];
         char up[20];
 
         ip_addr_str(&row->key.remote_ip, address);
+        abbreviate(row->name[0] ? row->name : "-", (size_t)columns.width[1], 0, domain);
+        abbreviate(row->key.application[0] ? row->key.application : "unresolved",
+                   (size_t)columns.width[0], 0, application);
 
         if (protocol_has_ports(row->key.protocol)) {
-            snprintf(endpoint, sizeof endpoint, "%s%s%s:%u/%s", row->key.remote_ip.family == 6 ? "[" : "",
-                     address, row->key.remote_ip.family == 6 ? "]" : "",
-                     row->key.remote_port, row->quic ? "QUIC(UDP)" : protocol_label(row->key.protocol));
-        } else {
-            snprintf(endpoint, sizeof endpoint, "%s/%s", address, protocol_label(row->key.protocol));
+            snprintf(port, sizeof port, "%u", row->key.remote_port);
         }
-        endpoint_label(row->name, endpoint, endpoint_width, label);
+
         age(now, row->totals.last_seen, last);
 
         if (live && !row->rates_valid) {
@@ -356,20 +445,30 @@ static void conversation_panel(struct panel p, const struct tui_snapshot *snapsh
         } else {
             bytes(live ? row->rate_down : (double)row->totals.bytes_in, down);
             bytes(live ? row->rate_up : (double)row->totals.bytes_out, up);
+
+            if (live) {
+                const size_t down_length = strlen(down);
+                const size_t up_length = strlen(up);
+
+                snprintf(down + down_length, sizeof down - down_length, "/s");
+                snprintf(up + up_length, sizeof up - up_length, "/s");
+            }
         }
 
         const int attributes = state->focus == focus && selected == index ? A_REVERSE : 0;
+        const char *values[] = { application, domain, address, port,
+                                row->quic ? "QUIC (UDP)" : protocol_name(row->key.protocol), down, up, last };
 
-        if (show_seen) {
-            text(p.y + 2 + i, p.x + 1, p.width - 2, attributes,
-                 "%c    %-*.*s %-*.*s %10.10s %10.10s %6.6s", selected == index ? '>' : ' ',
-                 application_width, application_width, row->key.application[0] ? row->key.application : "unresolved",
-                 endpoint_width, endpoint_width, label, down, up, last);
-        } else {
-            text(p.y + 2 + i, p.x + 1, p.width - 2, attributes,
-                 "%c    %-*.*s %-*.*s %10.10s %10.10s", selected == index ? '>' : ' ',
-                 application_width, application_width, row->key.application[0] ? row->key.application : "unresolved",
-                 endpoint_width, endpoint_width, label, down, up);
+        text(p.y + 2 + i, p.x + 1, p.width - 2, attributes, "%c%*s", selected == index ? '>' : ' ', p.width - 3, "");
+        offset = 0;
+
+        for (int column = 0; column < 8; column++) {
+            const int width = columns.width[column];
+
+            if (width != 0) {
+                conversation_cell(p, p.y + 2 + i, offset, width, scroll, values[column], column >= 3 && column != 4, attributes);
+                offset += width + 1;
+            }
         }
 
         if (row->totals.packets_in != 0) {
@@ -386,8 +485,8 @@ static void conversation_panel(struct panel p, const struct tui_snapshot *snapsh
     }
 
     text(p.y + p.height - 2, p.x + 2, p.width - 4, A_DIM,
-         live ? "%zu newest matches (max %d) | -- waiting | Enter: details"
-              : "%zu shown (limit %d) | Enter: details", count, TUI_MAX_ROWS);
+         live ? "%zu matches (max %d) | Left/Right columns | -- waiting"
+              : "%zu shown (limit %d) | Left/Right columns | Enter details", count, TUI_MAX_ROWS);
 }
 
 static void application_panel(struct panel p, const struct tui_snapshot *snapshot,
@@ -501,10 +600,11 @@ static void modal(const struct tui_snapshot *snapshot, const struct tui_screen *
 
     if (state->help) {
         const char *lines[] = {
-            "Tab / Shift-Tab  Change focused panel", "Up/Down, j/k     Select row; PgUp/PgDn, Home/End also work",
+            "Tab / Shift-Tab  Change focused panel", "Up/Down select | Left/Right scroll columns | PgUp/PgDn, Home/End",
             "Enter           Details; on Applications: filter conversations", "/               Search name, remote IP, or application (conversations)",
             "s: cumulative sort | l: live recency/total/down/up", "r               Live window: 10s / 30s / 120s / all",
             "f               Protocol: any / TCP / UDP / ICMP / ICMPv6 / ESP", "v               Address family: any / IPv4 / IPv6",
+            "b               Hold/resume list order; navigation holds it automatically",
             "p               Pause auto-refresh; collector keeps running", "q / Ctrl-C      Quit viewer; collector keeps running",
             "Rates are database counter deltas, not NIC speed.", "IO: down=incoming, up=outgoing; observed packet directions.",
             "Graphs: old -> new, shared scale; _ is zero, @ is peak.", "i: choose collector capture interface (local control socket)",
@@ -614,7 +714,7 @@ void tui_screen_draw(const struct tui_snapshot *snapshot, const struct tui_optio
         age(now, snapshot->loaded_at, latest);
     }
     text(0, 1, COLS - 2, A_BOLD | COLOR_PAIR(1), "PIGEON | read-only viewer | %s | refresh %s ago",
-         state->paused ? "AUTO-REFRESH PAUSED" : "1s refresh", latest);
+         state->paused ? "AUTO-REFRESH PAUSED" : state->browsing ? "BROWSING: order held (b resumes)" : "1s refresh", latest);
     text(1, 1, COLS - 2, 0, "App: %s | Search: %s | Proto: %s | IP: %s | DB: %s",
          options->application_selected ? (options->application[0] ? options->application : "unresolved") : "all",
          options->search[0] ? options->search : "all", options->protocol == 0 ? "any" : protocol_name(options->protocol),
@@ -652,8 +752,8 @@ void tui_screen_draw(const struct tui_snapshot *snapshot, const struct tui_optio
     text(LINES - 2, 1, COLS - 2, error[0] ? COLOR_PAIR(3) : A_DIM,
          "%s", error[0] ? error : state->focus == 2
          ? "Tab panel | arrows select | Enter filter app | / search | s sort | p pause"
-         : "Tab panel | arrows select | Enter details | / search | s sort | r recent | f/v filters | p pause");
-    text(LINES - 1, 1, COLS - 2, A_DIM, "i interfaces | l live sort | a all apps | d details | ? help | q quit");
+         : "Tab panel | Up/Down select | Left/Right columns | Enter details | / search | p pause");
+    text(LINES - 1, 1, COLS - 2, A_DIM, "b resume/hold order | i interfaces | l live sort | a all apps | d details | ? help | q quit");
 
     if (state->details || state->help) {
         modal(snapshot, state);
@@ -695,7 +795,7 @@ int tui_screen_key(int key, const struct tui_snapshot *snapshot,
     }
 
     if (state->help || state->details) {
-        size_t lines = state->help ? 16 : state->focus == 3 ? 5 : state->focus == 2 ? 7 : state->focus == 0 ? 14 : 12;
+        size_t lines = state->help ? 17 : state->focus == 3 ? 5 : state->focus == 2 ? 7 : state->focus == 0 ? 14 : 12;
 
         if (!state->help && state->focus != 2 && panel_count(snapshot, state->focus) != 0) {
             const size_t index = state->selected[state->focus];
@@ -722,17 +822,40 @@ int tui_screen_key(int key, const struct tui_snapshot *snapshot,
     const size_t count = panel_count(snapshot, state->focus);
     size_t *selected = &state->selected[state->focus];
 
+    const int navigation = key == KEY_UP || key == KEY_DOWN || key == 'j' || key == 'k' ||
+                           key == KEY_NPAGE || key == KEY_PPAGE || key == KEY_HOME || key == KEY_END ||
+                           key == KEY_LEFT || key == KEY_RIGHT || key == 'd' || key == '\n' || key == KEY_ENTER;
+
+    if (navigation && count != 0) {
+        state->browsing = 1;
+    }
+
+    /* Changes to filters/ranking deliberately rebuild the list. */
+    if (key == '/' || key == 27 || key == 's' || key == 'l' || key == 'r' ||
+        key == 'f' || key == 'v' || key == 'a') {
+        state->browsing = 0;
+    }
+
     switch (key) {
+        case 'b':
+            state->browsing = !state->browsing;
+
+            return TUI_KEY_REFRESH;
+
         case 'i':
             return TUI_KEY_INTERFACES;
 
         case '\t':
             state->focus = (state->focus + 1) % 4;
-            break;
+            state->browsing = 0;
+
+            return TUI_KEY_REFRESH;
 
         case KEY_BTAB:
             state->focus = (state->focus + 3) % 4;
-            break;
+            state->browsing = 0;
+
+            return TUI_KEY_REFRESH;
 
         case KEY_DOWN:
         case 'j':
@@ -746,6 +869,35 @@ int tui_screen_key(int key, const struct tui_snapshot *snapshot,
         case 'k':
             if (*selected != 0) {
                 (*selected)--;
+            }
+
+            break;
+
+        case KEY_LEFT:
+        case KEY_RIGHT:
+            if (state->focus < 2) {
+                int width = COLS;
+
+                if (COLS >= 110 && LINES >= 26) {
+                    width = state->focus == 0 ? COLS / 2 : COLS - COLS / 2;
+                }
+
+                const struct tui_conversation *rows = state->focus == 0 ? snapshot->live : snapshot->top;
+                const struct conversation_columns columns = conversation_columns(width, rows, count, state->focus == 0);
+                const int maximum = columns.total > width - 8 ? columns.total - width + 8 : 0;
+                int *scroll = &state->column_scroll[state->focus];
+
+                if (*scroll > maximum) {
+                    *scroll = maximum;
+                }
+
+                *scroll += key == KEY_RIGHT ? 8 : -8;
+
+                if (*scroll < 0) {
+                    *scroll = 0;
+                } else if (*scroll > maximum) {
+                    *scroll = maximum;
+                }
             }
 
             break;
@@ -773,6 +925,7 @@ int tui_screen_key(int key, const struct tui_snapshot *snapshot,
                 options->application_selected = 1;
                 options->search[0] = '\0';
                 state->focus = 1;
+                state->browsing = 0;
                 state->selected[0] = state->selected[1] = 0;
 
                 return TUI_KEY_REFRESH;
@@ -849,6 +1002,59 @@ int tui_screen_key(int key, const struct tui_snapshot *snapshot,
     }
 
     return 0;
+}
+
+void tui_screen_hold_list(struct tui_snapshot *old, struct tui_snapshot *next,
+                          const struct tui_screen *state) {
+    if (!state->browsing) {
+        return;
+    }
+
+    const int focus = state->focus;
+    const size_t old_count = panel_count(old, focus);
+    const size_t next_count = panel_count(next, focus);
+
+    for (size_t i = 0; i < old_count; i++) {
+        if (focus == 0) {
+            old->live[i].rates_valid = 0;
+        }
+
+        for (size_t j = 0; j < next_count; j++) {
+            if (focus == 2 && strcmp(old->applications[i].name, next->applications[j].name) == 0) {
+                old->applications[i] = next->applications[j];
+                break;
+            }
+
+            if (focus == 3 && ip_addr_equal(&old->endpoints[i].ip, &next->endpoints[j].ip)) {
+                old->endpoints[i] = next->endpoints[j];
+                break;
+            }
+
+            if (focus < 2) {
+                struct tui_conversation *rows = focus == 0 ? old->live : old->top;
+                const struct tui_conversation *incoming = focus == 0 ? next->live : next->top;
+
+                if (flow_key_equal(&rows[i].key, &incoming[j].key)) {
+                    rows[i] = incoming[j];
+                    break;
+                }
+            }
+        }
+    }
+
+    if (focus == 0) {
+        memcpy(next->live, old->live, old_count * sizeof *old->live);
+        next->live_count = old_count;
+    } else if (focus == 1) {
+        memcpy(next->top, old->top, old_count * sizeof *old->top);
+        next->top_count = old_count;
+    } else if (focus == 2) {
+        memcpy(next->applications, old->applications, old_count * sizeof *old->applications);
+        next->application_count = old_count;
+    } else {
+        memcpy(next->endpoints, old->endpoints, old_count * sizeof *old->endpoints);
+        next->endpoint_count = old_count;
+    }
 }
 
 void tui_screen_reselect(const struct tui_snapshot *old, const struct tui_snapshot *next,

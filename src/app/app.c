@@ -3,9 +3,22 @@
 #include <errno.h>
 #include <pthread.h>
 #include <signal.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+#define DEBUG_SLOTS 128
+#define DEBUG_LINES_PER_SECOND 20
+
+struct app_debug_slot {
+    struct flow_key key;
+    uint16_t local_port;
+    enum app_lookup_reason reason;
+    int sample_error;
+    double logged_at;
+    int valid;
+};
 
 struct app_resolver {
     pthread_t worker;
@@ -13,6 +26,12 @@ struct app_resolver {
     pthread_cond_t wake;
     struct app_snapshot *snapshot;
     int stopping;
+    int debug;
+    int sample_error;
+    struct app_debug_slot debug_slots[DEBUG_SLOTS];
+    int64_t debug_second;
+    unsigned debug_lines;
+    unsigned debug_suppressed;
 };
 
 static double monotonic_now(void) {
@@ -55,29 +74,100 @@ static int unspecified(const struct ip_addr *address) {
     return 1;
 }
 
-void app_snapshot_lookup(const struct app_snapshot *snapshot, const struct flow_key *key,
-                           uint16_t local_port, char out[FLOW_APP_LEN]) {
-    out[0] = '\0';
+#define OWNER_CACHE_SECONDS 5.0
 
-    if (snapshot == NULL) {
-        return;
-    }
-
+static size_t first_port(const struct app_snapshot *snapshot, uint16_t port) {
     size_t low = 0;
     size_t high = snapshot->count;
 
     while (low < high) {
         const size_t middle = low + (high - low) / 2;
 
-        if (snapshot->sockets[middle].local_port < local_port) {
+        if (snapshot->sockets[middle].local_port < port) {
             low = middle + 1;
         } else {
             high = middle;
         }
     }
 
+    return low;
+}
+
+void app_snapshot_cache_owners(struct app_snapshot *next, const struct app_snapshot *previous, double now) {
+    for (size_t i = 0; i < next->count; i++) {
+        struct app_socket *socket = &next->sockets[i];
+
+        if (socket->owner_seen) {
+            socket->owner_confirmed_at = now;
+            socket->owner_cached = 0;
+
+            continue;
+        }
+
+        if (previous == NULL || socket->ambiguous || !socket->cookie_valid || socket->inode == 0 || now < 0) {
+            continue;
+        }
+
+        const struct app_socket *match = NULL;
+
+        for (size_t j = first_port(previous, socket->local_port);
+             j < previous->count && previous->sockets[j].local_port == socket->local_port; j++) {
+            const struct app_socket *old = &previous->sockets[j];
+
+            if (!old->cookie_valid || old->cookie != socket->cookie || old->inode != socket->inode ||
+                old->protocol != socket->protocol || old->remote_port != socket->remote_port ||
+                !ip_addr_equal(&old->local, &socket->local) || !ip_addr_equal(&old->remote, &socket->remote)) {
+                continue;
+            }
+
+            if (!old->owner_seen || old->ambiguous || old->application[0] == '\0' ||
+                now < old->owner_confirmed_at || now - old->owner_confirmed_at >= OWNER_CACHE_SECONDS) {
+                match = NULL;
+                break;
+            }
+
+            if (match != NULL && strcmp(match->application, old->application) != 0) {
+                match = NULL;
+                break;
+            }
+
+            match = old;
+        }
+
+        if (match != NULL) {
+            memcpy(socket->application, match->application, sizeof socket->application);
+            socket->owner_seen = 1;
+            socket->owner_cached = 1;
+            socket->owner_confirmed_at = match->owner_confirmed_at;
+        }
+    }
+}
+
+void app_snapshot_lookup(const struct app_snapshot *snapshot, const struct flow_key *key,
+                           uint16_t local_port, char out[FLOW_APP_LEN]) {
+    app_snapshot_lookup_at(snapshot, key, local_port, snapshot != NULL ? snapshot->sampled_at : 0, out);
+}
+
+void app_snapshot_lookup_at(const struct app_snapshot *snapshot, const struct flow_key *key,
+                            uint16_t local_port, double now, char out[FLOW_APP_LEN]) {
+    (void)app_snapshot_diagnose(snapshot, key, local_port, now, out);
+}
+
+enum app_lookup_reason app_snapshot_diagnose(const struct app_snapshot *snapshot, const struct flow_key *key,
+                                             uint16_t local_port, double now, char out[FLOW_APP_LEN]) {
+    out[0] = '\0';
+
+    if (snapshot == NULL) {
+        return APP_LOOKUP_NO_SNAPSHOT;
+    }
+
+    const size_t low = first_port(snapshot, local_port);
+
     int best = -1;
+    int missing = 0;
     int ambiguous = 0;
+    int expired = 0;
+    int cached = 0;
 
     for (size_t i = low; i < snapshot->count && snapshot->sockets[i].local_port == local_port; i++) {
         const struct app_socket *socket = &snapshot->sockets[i];
@@ -92,6 +182,8 @@ void app_snapshot_lookup(const struct app_snapshot *snapshot, const struct flow_
             continue;
         }
 
+        const int owner_expired = socket->owner_cached &&
+            (now < socket->owner_confirmed_at || now - socket->owner_confirmed_at >= OWNER_CACHE_SECONDS);
         const int score = (!local_any ? 1 : 0) + (!remote_any ? 2 : 0);
 
         if (score < best) {
@@ -100,17 +192,34 @@ void app_snapshot_lookup(const struct app_snapshot *snapshot, const struct flow_
 
         if (score > best) {
             best = score;
-            ambiguous = socket->ambiguous || !socket->owner_seen;
+            missing = !socket->owner_seen || socket->application[0] == '\0';
+            ambiguous = socket->ambiguous && socket->application[0] != '\0';
+            expired = owner_expired;
+            cached = socket->owner_cached;
             memcpy(out, socket->application, FLOW_APP_LEN);
-        } else if (socket->ambiguous || !socket->owner_seen ||
-                   strcmp(out, socket->application) != 0) {
-            ambiguous = 1;
+        } else {
+            if ((socket->ambiguous && socket->application[0] != '\0') ||
+                (out[0] != '\0' && socket->application[0] != '\0' && strcmp(out, socket->application) != 0)) {
+                ambiguous = 1;
+            }
+
+            missing |= !socket->owner_seen || socket->application[0] == '\0';
+            expired |= owner_expired;
+            cached &= socket->owner_cached;
         }
     }
 
-    if (ambiguous) {
-        out[0] = '\0';
+    if (best == -1) {
+        return APP_LOOKUP_NO_SOCKET;
     }
+
+    if (ambiguous || missing || expired) {
+        out[0] = '\0';
+
+        return ambiguous ? APP_LOOKUP_AMBIGUOUS : expired ? APP_LOOKUP_CACHE_EXPIRED : APP_LOOKUP_OWNER_MISSING;
+    }
+
+    return cached ? APP_LOOKUP_CACHE : APP_LOOKUP_SNAPSHOT;
 }
 
 #ifdef __linux__
@@ -120,17 +229,34 @@ static void *sample_worker(void *context) {
     for (;;) {
         const double started = monotonic_now();
         struct app_snapshot *next = app_snapshot_read();
+        const int sample_error = next != NULL ? 0 : (errno != 0 ? errno : EIO);
 
         if (next != NULL) {
             next->sampled_at = started;
             app_snapshot_sort(next);
         }
 
-        pthread_mutex_lock(&resolver->mutex);
-
+        /* Only this worker replaces/frees snapshots; destruction joins it.
+         * Build the cache outside the lookup lock so capture never waits on
+         * the ownership merge itself. The previous snapshot stays immutable. */
         struct app_snapshot *previous = resolver->snapshot;
 
-        resolver->snapshot = next;
+        if (next != NULL) {
+            app_snapshot_cache_owners(next, previous, started);
+        }
+
+        pthread_mutex_lock(&resolver->mutex);
+
+        resolver->sample_error = sample_error;
+
+        if (next != NULL) {
+            resolver->snapshot = next;
+        } else {
+            previous = NULL;
+        }
+
+        /* A failed sample leaves the previous snapshot available only until
+         * its original three-second freshness deadline; never renew it. */
         pthread_mutex_unlock(&resolver->mutex);
         app_snapshot_destroy(previous);
 
@@ -248,6 +374,72 @@ void app_resolver_destroy(struct app_resolver *resolver) {
     free(resolver);
 }
 
+void app_resolver_set_debug(struct app_resolver *resolver, int enabled) {
+    pthread_mutex_lock(&resolver->mutex);
+    resolver->debug = enabled;
+    pthread_mutex_unlock(&resolver->mutex);
+}
+
+static void debug_lookup(struct app_resolver *resolver, const struct flow_key *key, uint16_t port,
+                          double now, double age, enum app_lookup_reason reason, const char *application) {
+    static const char *reasons[] = { "snapshot", "cache", "no-snapshot", "stale-snapshot", "no-matching-socket",
+                                    "owner-missing", "ambiguous-owners", "owner-cache-expired", "clock-error" };
+    const size_t bucket = (flow_key_hash(key) ^ port) % DEBUG_SLOTS;
+    struct app_debug_slot *slot = &resolver->debug_slots[bucket];
+    struct flow_key observed = *key;
+
+    memcpy(observed.application, application, strlen(application) + 1);
+
+    if (slot->valid && slot->local_port == port && slot->reason == reason &&
+        slot->sample_error == resolver->sample_error &&
+        flow_key_equal(&slot->key, &observed) && now >= slot->logged_at && now - slot->logged_at < 5.0) {
+        return;
+    }
+
+    const int64_t second = now >= 0 ? (int64_t)now : 0;
+
+    if (second != resolver->debug_second) {
+        if (resolver->debug_suppressed != 0) {
+            fprintf(stderr, "attribution rate-limited=%u\n", resolver->debug_suppressed);
+        }
+
+        resolver->debug_second = second;
+        resolver->debug_lines = 0;
+        resolver->debug_suppressed = 0;
+    }
+
+    if (resolver->debug_lines >= DEBUG_LINES_PER_SECOND) {
+        resolver->debug_suppressed++;
+
+        return;
+    }
+
+    *slot = (struct app_debug_slot){ .key = observed, .local_port = port, .reason = reason,
+                                     .sample_error = resolver->sample_error, .logged_at = now, .valid = 1 };
+    resolver->debug_lines++;
+
+    char local[IP_ADDR_STR_LEN];
+    char remote[IP_ADDR_STR_LEN];
+    char safe_application[FLOW_APP_LEN];
+
+    for (size_t i = 0; i < sizeof safe_application; i++) {
+        const unsigned char byte = (unsigned char)application[i];
+
+        safe_application[i] = byte >= 32 && byte <= 126 ? (char)byte : '?';
+
+        if (byte == 0) {
+            safe_application[i] = '\0';
+            break;
+        }
+    }
+
+    safe_application[sizeof safe_application - 1] = '\0';
+
+    fprintf(stderr, "attribution local=[%s]:%u peer=[%s]:%u proto=%u owner=%s result=%s snapshot_age=%.3fs sample_errno=%d\n",
+            ip_addr_str(&key->us_ip, local), port, ip_addr_str(&key->remote_ip, remote), key->remote_port,
+            key->protocol, safe_application[0] ? safe_application : "-", reasons[reason], age, resolver->sample_error);
+}
+
 void app_resolver_lookup(const struct flow_key *key, uint16_t local_port,
                           char out[FLOW_APP_LEN], void *context) {
     struct app_resolver *resolver = context;
@@ -264,9 +456,21 @@ void app_resolver_lookup(const struct flow_key *key, uint16_t local_port,
 
     const struct app_snapshot *snapshot = resolver->snapshot;
 
-    if (snapshot != NULL && snapshot->sampled_at >= 0 && now >= snapshot->sampled_at &&
-        now - snapshot->sampled_at <= 3.0) {
-        app_snapshot_lookup(snapshot, key, local_port, out);
+    enum app_lookup_reason reason = APP_LOOKUP_NO_SNAPSHOT;
+    const double age = snapshot != NULL ? now - snapshot->sampled_at : -1;
+
+    if (now < 0) {
+        reason = APP_LOOKUP_CLOCK_ERROR;
+    } else if (snapshot != NULL) {
+        reason = APP_LOOKUP_STALE;
+
+        if (snapshot->sampled_at >= 0 && now >= snapshot->sampled_at && age <= 3.0) {
+            reason = app_snapshot_diagnose(snapshot, key, local_port, now, out);
+        }
+    }
+
+    if (resolver->debug) {
+        debug_lookup(resolver, key, local_port, now, age, reason, out);
     }
 
     pthread_mutex_unlock(&resolver->mutex);
