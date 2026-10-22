@@ -10,6 +10,8 @@ static int fake_source;
 static int fail_open;
 static int stopped;
 static int closed;
+static unsigned int waits;
+static int stop_wait;
 
 int __wrap_netif_select(const char *name, struct netif_info *out) {
     memset(out, 0, sizeof *out);
@@ -54,6 +56,24 @@ void __wrap_capture_source_close(struct capture_source *source) {
 
 void __wrap_capture_stop(void) {
     stopped++;
+}
+
+int __wrap_capture_wait_tick(unsigned int seconds, capture_tick_cb tick, void *user) {
+    (void)tick;
+    const unsigned int delays[] = { 1, 2, 4, 8, 16, 30, 30 };
+
+    CHECK(waits < sizeof delays / sizeof delays[0]);
+    CHECK(seconds == delays[waits]);
+    waits++;
+    fail_open = waits < 7;
+
+    if (stop_wait) {
+        char reply[128];
+
+        control_command("STOP", reply, sizeof reply, user);
+    }
+
+    return 0;
 }
 
 int main(void) {
@@ -126,9 +146,39 @@ int main(void) {
     CHECK(flow_flush(context.flows) == 0);
     CHECK(store_lookup(context.store, &key, &row) == 1 && row.delta.bytes_out == 7);
 
+    /* Reconnecting to the same interface must reopen it and refresh addresses. */
+    capture_source_close(context.pending_source);
+    flow_destroy(context.pending_flows);
+    context.pending_source = NULL;
+    context.pending_flows = NULL;
+    strcpy(context.current_info.name, "eth0");
+    context.recovering = 1;
+    control_command("SELECT eth0", reply, sizeof reply, &context);
+    CHECK(context.pending_source != NULL && context.pending_flows != NULL);
+    CHECK(!context.pending_automatic && context.pending_local_count == 1);
+    CHECK(stopped == 2);
+
+    capture_source_close(context.pending_source);
+    flow_destroy(context.pending_flows);
+    context.pending_source = NULL;
+    context.pending_flows = NULL;
+    context.automatic = 1;
+    CHECK(reconnect_capture(&context) == 0);
+    CHECK(waits == 7 && context.pending_source != NULL && context.pending_automatic);
+    CHECK(stopped == 3);
+
+    capture_source_close(context.pending_source);
+    flow_destroy(context.pending_flows);
+    context.pending_source = NULL;
+    context.pending_flows = NULL;
+    waits = 0;
+    stop_wait = 1;
+    CHECK(reconnect_capture(&context) == -1);
+    CHECK(waits == 1 && context.shutdown_requested);
+
     control_command("STOP", reply, sizeof reply, &context);
     CHECK(strcmp(reply, "OK\tStopping\n") == 0);
-    CHECK(context.shutdown_requested && stopped == 2);
+    CHECK(context.shutdown_requested && stopped == 5);
 
     capture_source_close(context.pending_source);
     flow_destroy(context.pending_flows);

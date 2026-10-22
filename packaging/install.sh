@@ -9,6 +9,7 @@ version=latest
 component=core
 local_dir=
 work=
+autostart=default
 
 fail() { printf 'pigeon installer: %s\n' "$*" >&2; exit 1; }
 cleanup() { [ -z "$work" ] || rm -rf "$work"; }
@@ -26,8 +27,9 @@ while [ "$#" -gt 0 ]; do
             [ "$#" -ge 2 ] || fail "$1 requires a value"
             case "$1" in --version) version=$2 ;; --from) local_dir=$2 ;; esac
             shift ;;
+        --no-autostart) autostart=off ;;
         --help)
-            printf '%s\n' 'Usage: install.sh [--version X.Y.Z] [--from RELEASE_DIRECTORY]' \
+            printf '%s\n' 'Usage: install.sh [--version X.Y.Z] [--from RELEASE_DIRECTORY] [--no-autostart]' \
                 'Defaults: ~/.local/share/pigeon and ~/.local/bin.' \
                 'Override with PIGEON_INSTALL_ROOT, PIGEON_BIN_DIR, PIGEON_DOWNLOAD_URL.'
             exit 0 ;;
@@ -159,6 +161,19 @@ for component in $components; do
         mv -fT "$temporary" "$bin/$command"
     done
 done
+# New installations start at boot by default; explicit off survives upgrades.
+if [ "$autostart" = default ]; then
+    autostart=on
+    if [ -f "$root/autostart.conf" ] && [ "$(cat "$root/autostart.conf")" = off ]; then
+        autostart=off
+    fi
+fi
+if [ "$autostart" = on ] && { ! command -v systemctl >/dev/null 2>&1 || [ ! -d /run/systemd/system ]; }; then
+    printf 'Boot startup unavailable: this system does not use systemd. Run pigeon start after boot.\n' >&2
+elif [ -f "$destination/share/autostart.sh" ]; then
+    sh "$destination/share/autostart.sh" "$destination" "$root" "$root/pigeon.db" "$autostart" ||\
+        fail 'boot startup was not configured; run pigeon autostart on or reinstall with --no-autostart'
+fi
 progress 6 'Ready'
 if [ "$component" = core ]; then
     printf '\nInstalled Pigeon CLI %s. Commands: pigeon, pigeon-tui\n' "$version"
@@ -180,3 +195,5 @@ else
 fi
 
 printf 'Uninstall CLI/TUI: pigeon uninstall (keeps your database).\n'
+
+printf 'Boot startup: pigeon autostart on | off | status\n'

@@ -162,3 +162,31 @@ overrides do not change the installation directory or modify existing data.
 Uninstall CLI/TUI with `pigeon uninstall`. Capture is stopped and pending
 traffic saved before removal. The GUI, traffic database and logs are kept.
 Uninstall GUI separately with `pigeon-gui --uninstall`.
+
+## Boot startup and network recovery
+
+New CLI installations enable start at boot by default on systemd systems.
+Administrator permission is requested once to install a per-user system service.
+The service runs a root-owned snapshot of the release, starts without a login,
+and retries if capture cannot start before the network is available. Upgrades
+refresh that snapshot. An explicit off setting is preserved across upgrades.
+
+```sh
+pigeon autostart status
+pigeon autostart off
+pigeon autostart on
+```
+
+Turning boot startup off leaves the current capture running. `pigeon stop`
+stops it now; an enabled service starts it again at the next reboot. CLI
+uninstallation disables and removes the service. Database and logs are kept.
+The installer accepts `--no-autostart` to opt out immediately. Non-systemd
+systems still support manual/background capture, but boot startup is reported
+as unavailable; no distribution-specific init files are changed.
+
+Live capture reopens a failed interface with increasing delays (up to 30 seconds),
+refreshes local addresses, and keeps the database and control socket open. Automatic
+selection can choose another supported active interface; manual selection stays
+on the requested interface. Stop commands and signals remain responsive while
+waiting. Pending traffic is flushed before reconnecting. Service logs are
+available through `pigeon logs` (administrator access may be requested).

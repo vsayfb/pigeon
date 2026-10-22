@@ -21,6 +21,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Check deployment preservation
         run: python3 packaging/test_deploy.py
+      - name: Check boot service configuration
+        run: python3 packaging/test_autostart.py
       - name: Check uninstaller
         run: python3 packaging/test_uninstall.py
       - name: Resolve version

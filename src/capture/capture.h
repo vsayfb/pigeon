@@ -66,6 +66,10 @@ int capture_run_live_tick(const char *ifname, capture_cb cb, capture_tick_cb tic
  * opening failures do not interrupt the current capture. */
 int capture_source_run(struct capture_source *source, capture_cb cb, capture_tick_cb tick, void *user);
 
+/* Waits between reconnect attempts while servicing ticks and stop signals.
+ * Returns -1 on wait/clock/signal-handler error, otherwise 0. */
+int capture_wait_tick(unsigned int seconds, capture_tick_cb tick, void *user);
+
 /* Requests termination of the current capture loop. Intended for callbacks;
  * has no effect when no capture is running. */
 void capture_stop(void);

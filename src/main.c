@@ -45,6 +45,7 @@ struct capture_context {
     int automatic;
     int pending_automatic;
     int shutdown_requested;
+    int recovering;
 };
 
 static void report_flow_error(struct capture_context *context) {
@@ -112,7 +113,7 @@ static void control_command(const char *request, char *reply, size_t capacity, v
         return;
     }
 
-    if (strcmp(selected, context->current_info.name) == 0) {
+    if (!context->recovering && strcmp(selected, context->current_info.name) == 0) {
         context->automatic = automatic;
         snprintf(reply, capacity, "OK\t%s\t%s\n", selected, automatic ? "auto" : "manual");
 
@@ -167,6 +168,48 @@ static void tick_flows(int64_t now, void *user) {
     if (!context->failed && flow_tick(context->flows, now) == -1) {
         report_flow_error(context);
     }
+}
+
+static int reconnect_capture(struct capture_context *context) {
+    context->recovering = 1;
+    fprintf(stderr, "capture interrupted; waiting to reconnect\n");
+
+    if (flow_flush(context->flows) == -1) {
+        report_flow_error(context);
+
+        return -1;
+    }
+
+    unsigned int delay = 1;
+
+    while (context->pending_source == NULL && !context->shutdown_requested && !context->failed) {
+        if (capture_wait_tick(delay, tick_flows, context) == -1) {
+            perror("capture reconnect wait");
+            context->failed = 1;
+
+            return -1;
+        }
+
+        if (capture_was_signalled()) {
+            context->shutdown_requested = 1;
+
+            return -1;
+        }
+
+        if (context->shutdown_requested || context->failed || context->pending_source != NULL) {
+            break;
+        }
+
+        char request[NETIF_NAME_LEN + 8];
+        char reply[256];
+
+        snprintf(request, sizeof request, context->automatic ? "AUTO" : "SELECT %s",
+                 context->current_info.name);
+        control_command(request, reply, sizeof reply, context);
+        delay = delay < 16 ? delay * 2 : 30;
+    }
+
+    return context->pending_source != NULL && !context->failed && !context->shutdown_requested ? 0 : -1;
 }
 
 static void observe_frame(const uint8_t *data, const uint32_t caplen,
@@ -512,14 +555,25 @@ int main(const int argc, char **argv) {
         } else {
             struct capture_source *live = capture_source_open(info.name);
 
-            rc = live == NULL ? -1 : 0;
+            rc = 0;
 
-            while (live != NULL) {
-                rc = capture_source_run(live, observe_frame, tick_flows, &context);
-                live = NULL;
+            for (;;) {
+                if (live != NULL) {
+                    rc = capture_source_run(live, observe_frame, tick_flows, &context);
+                    live = NULL;
+                }
 
-                if (context.shutdown_requested || context.pending_source == NULL || rc == -1 ||
-                    context.failed || capture_was_signalled()) {
+                if (context.shutdown_requested || context.failed || capture_was_signalled()) {
+                    break;
+                }
+
+                if (context.pending_source == NULL) {
+                    if (reconnect_capture(&context) == -1) {
+                        break;
+                    }
+                }
+
+                if (context.shutdown_requested || context.failed || capture_was_signalled()) {
                     break;
                 }
 
@@ -530,10 +584,15 @@ int main(const int argc, char **argv) {
                 memcpy(context.locals, context.pending_locals, context.local_count * sizeof *context.locals);
                 context.current_info = context.pending_info;
                 context.automatic = context.pending_automatic;
+                context.recovering = 0;
                 live = context.pending_source;
                 context.pending_source = NULL;
-                fprintf(stderr, "capture switched to %s (%s)\n", context.current_info.name,
+                fprintf(stderr, "capture connected to %s (%s)\n", context.current_info.name,
                         context.automatic ? "automatic" : "manual");
+            }
+
+            if (context.shutdown_requested || capture_was_signalled()) {
+                rc = 0;
             }
         }
 

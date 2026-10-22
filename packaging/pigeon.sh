@@ -65,6 +65,9 @@ case "${1:-}" in
     '')
         start
         exec "$bundle/bin/pigeon-tui" --db "$database" ;;
+    autostart)
+        [ "$#" -le 2 ] || fail 'usage: pigeon autostart on|off|status'
+        exec sh "$bundle/share/autostart.sh" "$bundle" "$data" "$database" "${2:-status}" ;;
     uninstall)
         [ "$#" = 1 ] || fail 'usage: pigeon uninstall'
         exec sh "$bundle/share/uninstall.sh" "$bundle" core ;;
@@ -84,6 +87,9 @@ case "${1:-}" in
         "$control" status "$database" ;;
     logs)
         [ "$#" = 1 ] || fail 'usage: pigeon logs'
+        if command -v systemctl >/dev/null 2>&1 && systemctl is-active --quiet "pigeon-$(id -u).service" 2>/dev/null; then
+            exec sudo journalctl -u "pigeon-$(id -u).service" -n 50 -f
+        fi
         [ -f "$log" ] || fail 'no collector log yet; run pigeon start'
         exec tail -n 50 -f "$log" ;;
     tui)
@@ -100,6 +106,7 @@ case "${1:-}" in
             'pigeon start [interface]  Start background capture' \
             'pigeon stop               Stop capture and save pending traffic' \
             'pigeon restart [iface]    Restart background capture' \
+            'pigeon autostart on|off|status  Configure start at boot (default on)' \
             'pigeon uninstall          Remove CLI/TUI, keeping traffic history' \
             'pigeon status             Show collector status' \
             'pigeon logs               Follow the collector log' \

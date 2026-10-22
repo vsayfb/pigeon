@@ -21,7 +21,7 @@ with tempfile.TemporaryDirectory(prefix='pigeon-installer-test-') as temporary:
     environment = dict(os.environ, PIGEON_INSTALL_ROOT=str(root), PIGEON_BIN_DIR=str(commands))
 
     def install(success=True):
-        result = subprocess.run(['sh', str(installer), '--from', str(site)],
+        result = subprocess.run(['sh', str(installer), '--no-autostart', '--from', str(site)],
                                 env=environment, capture_output=True, text=True)
         assert (result.returncode == 0) == success, result.stdout + result.stderr
         return result
@@ -52,6 +52,7 @@ with tempfile.TemporaryDirectory(prefix='pigeon-installer-test-') as temporary:
     install()
     second = (commands / 'pigeon').resolve()
     assert first != second and first.exists()
+    assert (root / 'autostart.conf').read_text().strip() == 'off'
     assert database.read_bytes() == b'preserve existing history'
 
     # Failed verification must leave the currently active commands untouched.

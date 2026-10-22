@@ -255,7 +255,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(test_capture_switch PRIVATE
             -Wl,--wrap=netif_select -Wl,--wrap=netif_addresses
             -Wl,--wrap=capture_select_interface -Wl,--wrap=capture_source_open
-            -Wl,--wrap=capture_source_close -Wl,--wrap=capture_stop)
+            -Wl,--wrap=capture_source_close -Wl,--wrap=capture_stop
+            -Wl,--wrap=capture_wait_tick)
     add_test(NAME capture_switch COMMAND test_capture_switch)
 endif()
 

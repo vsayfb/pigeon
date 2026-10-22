@@ -298,3 +298,52 @@ int capture_source_run(struct capture_source *source, capture_cb cb, capture_tic
 int capture_was_signalled(void) {
     return signalled != 0;
 }
+
+int capture_wait_tick(unsigned int seconds, capture_tick_cb tick, void *user) {
+    struct sigaction old_int;
+    struct sigaction old_term;
+
+    stop_requested = 0;
+    active_handle = NULL;
+
+    if (install_stop_handler(SIGINT, &old_int) == -1) {
+        return -1;
+    }
+
+    if (install_stop_handler(SIGTERM, &old_term) == -1) {
+        sigaction(SIGINT, &old_int, NULL);
+
+        return -1;
+    }
+
+    int result = 0;
+
+    for (unsigned int elapsed = 0; elapsed < seconds && !stop_requested && !signalled; elapsed++) {
+        const time_t now = time(NULL);
+
+        if (now == (time_t)-1) {
+            result = -1;
+
+            break;
+        }
+
+        tick((int64_t)now, user);
+
+        if (stop_requested) {
+            break;
+        }
+
+        const struct timespec delay = { .tv_sec = 1 };
+
+        if (nanosleep(&delay, NULL) == -1 && errno != EINTR) {
+            result = -1;
+
+            break;
+        }
+    }
+
+    sigaction(SIGINT, &old_int, NULL);
+    sigaction(SIGTERM, &old_term, NULL);
+
+    return result;
+}

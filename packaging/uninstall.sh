@@ -19,6 +19,9 @@ main() {
             printf 'Could not stop capture; installation was not removed.\n' >&2
             exit 1
         }
+        if [ -f "$bundle/share/autostart.sh" ]; then
+            sh "$bundle/share/autostart.sh" "$bundle" "$root" "${PIGEON_DATABASE:-$root/pigeon.db}" remove
+        fi
         commands='pigeon pigeon-tui'
     else
         commands=pigeon-gui

@@ -292,7 +292,32 @@ static void test_prepared_source(void) {
     reset_case();
 }
 
+static void waiting_tick(int64_t now, void *user) {
+    (void)now;
+    (void)user;
+
+    ticks++;
+
+    if (signal_to_raise != 0) {
+        CHECK(raise(signal_to_raise) == 0);
+    } else {
+        capture_stop();
+    }
+}
+
+static void test_reconnect_wait(void) {
+    reset_case();
+    CHECK(capture_wait_tick(30, waiting_tick, NULL) == 0);
+    CHECK(ticks == 1 && breaks == 0);
+    CHECK(!capture_was_signalled());
+
+    signal_to_raise = SIGTERM;
+    CHECK(capture_wait_tick(30, waiting_tick, NULL) == 0);
+    CHECK(capture_was_signalled() && ticks == 2);
+}
+
 int main(void) {
+    test_reconnect_wait();
     test_prepared_source();
     test_idle_stop(0);
     test_idle_stop(SIGINT);

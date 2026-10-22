@@ -125,7 +125,8 @@ def build(args):
         name = 'pigeon-collector' if target == 'pigeon' else target
         shutil.copy2(build_dir / target, stage / 'bin' / name)
     (stage / 'share').mkdir(exist_ok=True)
-    shutil.copy2(ROOT / 'packaging/uninstall.sh', stage / 'share/uninstall.sh')
+    for helper in ['uninstall.sh', 'autostart.sh', 'service-install.sh']:
+        shutil.copy2(ROOT / 'packaging' / helper, stage / 'share' / helper)
     shutil.copy2(ROOT / 'packaging/pigeon.sh', stage / 'bin' / 'pigeon')
     # Resolve the executable from its public symlink before locating resources.
     executable = stage / 'bin' / 'pigeon-tui'
