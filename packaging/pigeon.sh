@@ -9,7 +9,11 @@ if [ "$(basename "$(dirname "$bundle")")" != versions ]; then
     default_data=${XDG_DATA_HOME:-$HOME/.local/share}/pigeon
 fi
 data=${PIGEON_DATA_DIR:-$default_data}
-database=${PIGEON_DATABASE:-$data/pigeon.db}
+configured_database=$data/pigeon.db
+if [ -f "$data/database.conf" ]; then
+    configured_database=$(cat "$data/database.conf")
+fi
+database=${PIGEON_DATABASE:-$configured_database}
 log=$data/pigeon.log
 collector=$bundle/bin/pigeon-collector
 control=$bundle/bin/pigeon-control
@@ -36,6 +40,10 @@ start() {
     fi
     mkdir -p "$data"
     touch "$log" || fail "cannot write $log"
+    if [ "${PIGEON_GUI_AUTH:-0}" = 1 ]; then
+        sh "$bundle/share/autostart.sh" "$bundle" "$data" "$database" start
+        return
+    fi
     if [ "$(id -u)" != 0 ]; then
         command -v sudo >/dev/null 2>&1 || fail 'sudo is required to start capture'
         printf 'Capture needs administrator privileges.\n'
@@ -65,6 +73,13 @@ case "${1:-}" in
     '')
         start
         exec "$bundle/bin/pigeon-tui" --db "$database" ;;
+    database)
+        [ "$#" -le 2 ] || fail 'usage: pigeon database [absolute-file-path]'
+        if [ "$#" = 1 ]; then
+            printf '%s\n' "$database"
+            exit 0
+        fi
+        exec sh "$bundle/share/database.sh" "$bundle" "$data" "$database" "$2" ;;
     autostart)
         [ "$#" -le 2 ] || fail 'usage: pigeon autostart on|off|status'
         exec sh "$bundle/share/autostart.sh" "$bundle" "$data" "$database" "${2:-status}" ;;
@@ -106,6 +121,7 @@ case "${1:-}" in
             'pigeon start [interface]  Start background capture' \
             'pigeon stop               Stop capture and save pending traffic' \
             'pigeon restart [iface]    Restart background capture' \
+            'pigeon database [path]    Show or change storage, preserving history' \
             'pigeon autostart on|off|status  Configure start at boot (default on)' \
             'pigeon uninstall          Remove CLI/TUI, keeping traffic history' \
             'pigeon status             Show collector status' \

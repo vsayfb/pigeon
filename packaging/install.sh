@@ -161,6 +161,12 @@ for component in $components; do
         mv -fT "$temporary" "$bin/$command"
     done
 done
+database=$root/pigeon.db
+if [ -f "$root/database.conf" ]; then
+    database=$(cat "$root/database.conf")
+fi
+case "$database" in /*) ;; *) fail 'configured database path must be absolute' ;; esac
+
 # New installations start at boot by default; explicit off survives upgrades.
 if [ "$autostart" = default ]; then
     autostart=on
@@ -171,7 +177,7 @@ fi
 if [ "$autostart" = on ] && { ! command -v systemctl >/dev/null 2>&1 || [ ! -d /run/systemd/system ]; }; then
     printf 'Boot startup unavailable: this system does not use systemd. Run pigeon start after boot.\n' >&2
 elif [ -f "$destination/share/autostart.sh" ]; then
-    sh "$destination/share/autostart.sh" "$destination" "$root" "$root/pigeon.db" "$autostart" ||\
+    sh "$destination/share/autostart.sh" "$destination" "$root" "$database" "$autostart" ||\
         fail 'boot startup was not configured; run pigeon autostart on or reinstall with --no-autostart'
 fi
 progress 6 'Ready'
@@ -188,7 +194,7 @@ if [ "$component" = core ]; then
     printf '\nRun: pigeon\n'
     printf 'Capture starts in the background; sudo is requested when needed.\n'
     printf 'Manage: pigeon start | stop | restart | status | logs\n'
-    printf 'Database: %s/pigeon.db\n' "$root"
+    printf 'Database: %s\n' "$database"
 else
     printf 'Viewer: "%s/pigeon-gui" --database "%s/pigeon.db"\n' "$bin" "$root"
     printf 'The collector is installed separately using /cli/install.sh.\n'

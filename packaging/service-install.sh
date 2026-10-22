@@ -13,15 +13,17 @@ case "$bundle$database" in *'
 [ "$(id -u)" = 0 ] || exit 1
 unit="pigeon-$uid.service"
 base="/usr/local/lib/pigeon-$uid"
+installation=$(dirname "$(dirname "$(readlink -f "$bundle")")")
 file="/etc/systemd/system/$unit"
 if [ -e "$file" ]; then
-    if [ ! -f "$base/PIGEON_DATABASE" ] || [ "$(cat "$base/PIGEON_DATABASE")" != "$database" ]; then
+    if [ ! -f "$base/INSTALL_ROOT" ] || [ "$(cat "$base/INSTALL_ROOT")" != "$installation" ]; then
         printf 'A boot service for another Pigeon installation already exists.\n' >&2
         exit 1
     fi
 fi
 
 case "$action" in
+    authorize) exit 0 ;;
     off)
         systemctl disable "$unit"
         exit 0 ;;
@@ -31,7 +33,7 @@ case "$action" in
         rm -rf "$base"
         systemctl daemon-reload
         exit 0 ;;
-    on) ;;
+    on|start) ;;
     *) exit 2 ;;
 esac
 
@@ -43,10 +45,14 @@ staging=$(mktemp -d /usr/local/lib/.pigeon-service.XXXXXX)
 trap 'rm -rf "$staging"' EXIT HUP INT TERM
 cp -R "$bundle/." "$staging/"
 printf '%s\n' "$database" > "$staging/PIGEON_DATABASE"
+printf '%s\n' "$installation" > "$staging/INSTALL_ROOT"
 chown -R root:root "$staging"
 chmod -R go-w "$staging"
 
 # Gracefully stop an existing foreground service or detached collector first.
+if [ -f "$base/PIGEON_DATABASE" ]; then
+    "$bundle/bin/pigeon-control" stop "$(cat "$base/PIGEON_DATABASE")"
+fi
 "$bundle/bin/pigeon-control" stop "$database"
 if [ -f "$file" ]; then
     systemctl stop "$unit"
@@ -65,4 +71,8 @@ escape() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g; s/%/%%/g'; }
 } > "$file"
 chmod 644 "$file"
 systemctl daemon-reload
-systemctl enable --now "$unit"
+if [ "$action" = on ]; then
+    systemctl enable --now "$unit"
+else
+    systemctl start "$unit"
+fi

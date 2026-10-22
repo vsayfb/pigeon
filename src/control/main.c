@@ -1,6 +1,9 @@
 #include "control/control.h"
 
 #include <errno.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sqlite3.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -10,7 +13,66 @@ static int stopped_error(int error) {
     return error == ENOENT || error == ECONNREFUSED;
 }
 
+static int copy_database(const char *source, const char *destination) {
+    sqlite3 *input = NULL;
+    sqlite3 *output = NULL;
+    int result = 1;
+    const int fd = open(destination, O_WRONLY | O_CREAT | O_EXCL, 0600);
+
+    if (fd == -1) {
+        perror("database destination");
+
+        return 1;
+    }
+
+    close(fd);
+
+    if (sqlite3_open_v2(source, &input, SQLITE_OPEN_READONLY, NULL) != SQLITE_OK ||
+        sqlite3_open_v2(destination, &output, SQLITE_OPEN_READWRITE, NULL) != SQLITE_OK) {
+        fprintf(stderr, "Cannot open database for backup\n");
+    } else {
+        sqlite3_backup *backup = sqlite3_backup_init(output, "main", input, "main");
+
+        if (backup != NULL) {
+            int rc;
+            unsigned int retries = 0;
+
+            do {
+                rc = sqlite3_backup_step(backup, 128);
+
+                if (rc == SQLITE_BUSY || rc == SQLITE_LOCKED) {
+                    sqlite3_sleep(50);
+                    retries++;
+                }
+            } while (rc == SQLITE_OK || ((rc == SQLITE_BUSY || rc == SQLITE_LOCKED) && retries < 200));
+
+            const int finished = sqlite3_backup_finish(backup);
+
+            if (rc == SQLITE_DONE && finished == SQLITE_OK) {
+                result = 0;
+            }
+        }
+
+        if (result != 0) {
+            fprintf(stderr, "Database backup failed: %s\n", sqlite3_errmsg(output));
+        }
+    }
+
+    sqlite3_close(output);
+    sqlite3_close(input);
+
+    if (result != 0) {
+        unlink(destination);
+    }
+
+    return result;
+}
+
 int main(int argc, char **argv) {
+    if (argc == 4 && strcmp(argv[1], "backup") == 0) {
+        return copy_database(argv[2], argv[3]);
+    }
+
     if (argc != 3 || (strcmp(argv[1], "status") != 0 && strcmp(argv[1], "stop") != 0)) {
         fprintf(stderr, "usage: %s status|stop <database>\n", argv[0]);
 

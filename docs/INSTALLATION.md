@@ -78,7 +78,7 @@ Run **Release and publish Pigeon GUI** in the GUI repository when ready.
 Either workflow can create the Direct Upload Pages project `piigeon` on its
 first run. A `vX.Y.Z` tag matching the version in that repository's
 `CMakeLists.txt` also triggers release. Versions are independent: CLI currently
-`0.0.3`, GUI currently `0.0.2`.
+`0.0.4`, GUI currently `0.0.3`.
 
 ## How the shared deployment works
 
@@ -133,8 +133,8 @@ Build prerequisites: C compiler, CMake, Ninja, libpcap/SQLite/ncurses developmen
 files, Python 3.10+, and patchelf. Musl builds also need Linux kernel headers.
 
 ```sh
-python3 packaging/release.py build --version 0.0.3 --output dist
-python3 packaging/release.py site --version 0.0.3 --artifacts dist --output dist/upload
+python3 packaging/release.py build --version 0.0.4 --output dist
+python3 packaging/release.py site --version 0.0.4 --artifacts dist --output dist/upload
 PIGEON_INSTALL_ROOT=/tmp/pigeon-check/data PIGEON_BIN_DIR=/tmp/pigeon-check/bin \
   sh packaging/install.sh --from "$PWD/dist/upload"
 ```
@@ -190,3 +190,16 @@ selection can choose another supported active interface; manual selection stays
 on the requested interface. Stop commands and signals remain responsive while
 waiting. Pending traffic is flushed before reconnecting. Service logs are
 available through `pigeon logs` (administrator access may be requested).
+
+## Database location
+
+`pigeon database` prints the configured storage file. Change it with
+`pigeon database /absolute/path/pigeon.db`, or use GUI Settings. The default
+is `~/.local/share/pigeon/pigeon.db`. Pigeon stops active capture, copies a
+consistent SQLite backup (including committed WAL data), and restarts capture
+at the new path. Existing destination files are never overwritten; the original
+history file remains in place. The location is saved in `database.conf` alongside
+the installation so future starts and the GUI use it automatically. Boot-startup
+preferences are preserved. A running boot service is reconfigured using administrator
+authorization; the GUI uses PolicyKit for that prompt. `PIGEON_DATABASE` remains an
+explicit override and must be unset before changing the saved location.
