@@ -14,6 +14,9 @@ struct dns_cache;
  * Release with dns_cache_destroy(). Database errors are in store_error(). */
 struct dns_cache *dns_cache_create(struct store *store, size_t capacity, int64_t now);
 
+/* Clears in-memory names after persisted history was deleted. */
+void dns_cache_clear(struct dns_cache *cache);
+
 /* Frees the map without deleting persisted mappings. Accepts NULL. */
 void dns_cache_destroy(struct dns_cache *cache);
 

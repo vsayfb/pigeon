@@ -87,6 +87,10 @@ void flow_set_store(struct flow *flow, struct store *store);
  */
 int flow_flush(struct flow *flow);
 
+/* Deletes recorded history and forgets pre-deletion counters. NULL clears
+ * all traffic and DNS history. New packets may create fresh conversations. */
+int flow_delete(struct flow *flow, const struct flow_key *key);
+
 /*
  * Attempts a batch flush at most once per second using Unix seconds now,
  * then expires UDP entries idle for at least 30s and TCP entries idle for

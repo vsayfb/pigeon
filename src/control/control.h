@@ -8,11 +8,11 @@
 #define CONTROL_REPLY_LEN 16384
 
 /* Linux local stream protocol: one newline-terminated LIST, STATUS, STOP, AUTO, or
- * SELECT <interface> request per connection. Reply ends at EOF. First line
+ * SELECT <interface>, CLEAR, or DELETE <hex-identity> request per connection. Reply ends at EOF. First line
  * is OK<TAB>current<TAB>auto|manual, or ERROR<TAB>reason. LIST adds rows:
  * name<TAB>active|inactive<TAB>supported|unsupported|unavailable.
  * STOP requests graceful shutdown; socket removal follows the final store flush.
- * No database writes are performed directly through this protocol. */
+ * CLEAR/DELETE remove persisted history and pre-deletion in-memory traffic. */
 struct control_server;
 typedef void (*control_handler)(const char *request, char *reply, size_t capacity, void *user);
 

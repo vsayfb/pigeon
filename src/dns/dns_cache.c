@@ -120,7 +120,7 @@ struct dns_cache *dns_cache_create(struct store *store, size_t capacity, int64_t
     return cache;
 }
 
-void dns_cache_destroy(struct dns_cache *cache) {
+void dns_cache_clear(struct dns_cache *cache) {
     if (cache == NULL) {
         return;
     }
@@ -134,8 +134,15 @@ void dns_cache_destroy(struct dns_cache *cache) {
             free(entry);
             entry = next;
         }
+
+        cache->buckets[i] = NULL;
     }
 
+    cache->count = 0;
+}
+
+void dns_cache_destroy(struct dns_cache *cache) {
+    dns_cache_clear(cache);
     free(cache);
 }
 

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(pigeon VERSION 0.0.4 LANGUAGES C)
+project(pigeon VERSION 0.0.5 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
@@ -279,8 +279,8 @@ add_test(NAME address_scope COMMAND test_address_scope)
 include(GNUInstallDirs)
 install(TARGETS pigeon pigeon-tui RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 
-add_executable(pigeon-control src/control/main.c src/control/control.c)
-target_link_libraries(pigeon-control PRIVATE SQLite::SQLite3)
+add_executable(pigeon-control src/control/main.c)
+target_link_libraries(pigeon-control PRIVATE pigeon_core)
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND Python3_Interpreter_FOUND)
@@ -293,4 +293,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND Python3_Interpreter_FOUND)
     add_test(NAME database_location COMMAND ${Python3_EXECUTABLE}
             ${CMAKE_SOURCE_DIR}/tests/integration/test_database_location.py
             $<TARGET_FILE:pigeon-control>)
+endif()
+
+add_executable(test_history tests/unit/test_history.c)
+target_link_libraries(test_history PRIVATE pigeon_core)
+add_test(NAME history COMMAND test_history)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND Python3_Interpreter_FOUND)
+    add_test(NAME history_control COMMAND ${Python3_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tests/integration/test_history_control.py
+            $<TARGET_FILE:pigeon> $<TARGET_FILE:pigeon-control>
+            ${CMAKE_SOURCE_DIR}/tests/fixtures/short_frames.pcap)
 endif()

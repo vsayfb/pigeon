@@ -707,3 +707,42 @@ void flow_set_application_resolver(struct flow *flow,
     flow->resolve_application = resolve;
     flow->application_user = user;
 }
+
+int flow_delete(struct flow *flow, const struct flow_key *key) {
+    if (flow->store == NULL) {
+        errno = ENOSYS;
+
+        return -1;
+    }
+
+    /* Resolve pending attribution before deleting an exact process identity. */
+    if (key != NULL && flow_flush(flow) == -1) {
+        return -1;
+    }
+
+    if (store_delete(flow->store, key) == -1) {
+        errno = EIO;
+
+        return -1;
+    }
+
+    if (key != NULL) {
+        flow_table_remove(flow->table, key);
+
+        return 0;
+    }
+
+    while (flow->pending_oldest != NULL) {
+        pending_remove(flow, flow->pending_oldest);
+    }
+
+    const struct flow_entry *entry;
+
+    while ((entry = flow_table_oldest(flow->table)) != NULL) {
+        flow_table_remove(flow->table, flow_entry_key(entry));
+    }
+
+    dns_cache_clear(flow->dns);
+
+    return 0;
+}

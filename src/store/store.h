@@ -54,6 +54,10 @@ int store_flush(struct store *store, const struct store_row *rows, size_t count)
  */
 int store_lookup(struct store *store, const struct flow_key *key, struct store_row *out);
 
+/* Deletes one conversation, or all conversations and DNS history when key
+ * is NULL. Atomic; returns 0 on success or -1 with store_error set. */
+int store_delete(struct store *store, const struct flow_key *key);
+
 /* Returns a borrowed explanation of the last error, valid until the next
  * store operation or close. Successful operations clear the explanation. */
 const char *store_error(const struct store *store);

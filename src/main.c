@@ -62,6 +62,21 @@ static void report_flow_error(struct capture_context *context) {
 static void control_command(const char *request, char *reply, size_t capacity, void *user) {
     struct capture_context *context = user;
 
+    if (strcmp(request, "CLEAR") == 0 || strncmp(request, "DELETE ", 7) == 0) {
+        struct flow_key key;
+        const int clear = strcmp(request, "CLEAR") == 0;
+
+        if (!clear && flow_key_decode(request + 7, &key) == -1) {
+            snprintf(reply, capacity, "ERROR\tInvalid conversation identity\n");
+        } else if (flow_delete(context->flows, clear ? NULL : &key) == -1) {
+            snprintf(reply, capacity, "ERROR\tCould not delete recorded traffic\n");
+        } else {
+            snprintf(reply, capacity, "OK\tHistory deleted\n");
+        }
+
+        return;
+    }
+
     if (strcmp(request, "STOP") == 0) {
         context->shutdown_requested = 1;
         capture_stop();

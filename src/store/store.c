@@ -529,3 +529,35 @@ int store_dns_load(struct store *store, int64_t now,
 
     return result;
 }
+
+int store_delete(struct store *store, const struct flow_key *key) {
+    store->error[0] = '\0';
+
+    if (store->unusable || execute(store, "BEGIN IMMEDIATE") == -1) {
+        return -1;
+    }
+
+    int result = -1;
+    sqlite3_stmt *statement = NULL;
+
+    if (key == NULL) {
+        result = execute(store, "DELETE FROM conversations; DELETE FROM dns_cache;");
+    } else if (sqlite3_prepare_v2(store->db, "DELETE FROM conversations WHERE us_ip=?1 AND remote_ip=?2 "
+                                  "AND remote_port=?3 AND protocol=?4 AND application=?12", -1,
+                                  &statement, NULL) == SQLITE_OK && bind_key(statement, key) == SQLITE_OK &&
+               sqlite3_step(statement) == SQLITE_DONE) {
+        result = 0;
+    } else {
+        fail(store, "delete conversation");
+    }
+
+    sqlite3_finalize(statement);
+
+    if (result == -1 || execute(store, "COMMIT") == -1) {
+        rollback(store);
+
+        return -1;
+    }
+
+    return 0;
+}

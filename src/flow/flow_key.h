@@ -43,4 +43,60 @@ static inline uint32_t flow_key_hash(const struct flow_key *key) {
     return hash;
 }
 
+/* Decodes the GUI identity: address length/bytes, peer length/bytes,
+ * big-endian port, protocol and application, all hex encoded. */
+static inline int flow_key_decode(const char *hex, struct flow_key *out) {
+    unsigned char bytes[2 + 32 + 3 + FLOW_APP_LEN - 1];
+    const size_t length = strlen(hex);
+
+    if (length % 2 != 0 || length / 2 > sizeof bytes || length < 26) {
+        return -1;
+    }
+
+    for (size_t i = 0; i < length; i += 2) {
+        unsigned value = 0;
+
+        for (size_t j = 0; j < 2; j++) {
+            const unsigned char c = (unsigned char)hex[i + j];
+            const int digit = c >= '0' && c <= '9' ? c - '0' :
+                              c >= 'a' && c <= 'f' ? c - 'a' + 10 :
+                              c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+
+            if (digit < 0) {
+                return -1;
+            }
+
+            value = value * 16 + (unsigned)digit;
+        }
+
+        bytes[i / 2] = (unsigned char)value;
+    }
+
+    const size_t size = bytes[0];
+    const size_t fixed = 2 + 2 * size + 3;
+
+    if ((size != 4 && size != 16) || length / 2 < fixed || bytes[1 + size] != size) {
+        return -1;
+    }
+
+    const size_t app_length = length / 2 - fixed;
+    struct flow_key key = { 0 };
+
+    key.us_ip.family = key.remote_ip.family = size == 4 ? 4 : 6;
+    memcpy(key.us_ip.bytes, bytes + 1, size);
+    memcpy(key.remote_ip.bytes, bytes + size + 2, size);
+    key.remote_port = (uint16_t)((bytes[2 + 2 * size] << 8) | bytes[3 + 2 * size]);
+    key.protocol = bytes[4 + 2 * size];
+
+    if (app_length >= FLOW_APP_LEN || memchr(bytes + fixed, 0, app_length) != NULL ||
+        (key.protocol != 1 && key.protocol != 6 && key.protocol != 17 && key.protocol != 50 && key.protocol != 58)) {
+        return -1;
+    }
+
+    memcpy(key.application, bytes + fixed, app_length);
+    *out = key;
+
+    return 0;
+}
+
 #endif

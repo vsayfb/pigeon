@@ -4,6 +4,7 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <sqlite3.h>
+#include "store/store.h"
 #include <stdio.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -68,7 +69,95 @@ static int copy_database(const char *source, const char *destination) {
     return result;
 }
 
+static int delete_history(const char *database, const char *identity) {
+    struct flow_key key;
+
+    if (identity != NULL && flow_key_decode(identity, &key) == -1) {
+        fprintf(stderr, "Invalid conversation identity\n");
+
+        return 2;
+    }
+
+    char request[1024];
+    char reply[CONTROL_REPLY_LEN];
+
+    if (identity == NULL) {
+        snprintf(request, sizeof request, "CLEAR");
+    } else {
+        snprintf(request, sizeof request, "DELETE %s", identity);
+    }
+
+    if (control_request(database, request, reply, sizeof reply) == 0) {
+        if (strncmp(reply, "OK\t", 3) == 0) {
+            puts("Recorded traffic deleted. New traffic can appear again.");
+
+            return 0;
+        }
+
+        fprintf(stderr, "%s", strncmp(reply, "ERROR\t", 6) == 0 ? reply + 6 : reply);
+
+        return 2;
+    }
+
+    if (!stopped_error(errno)) {
+        const int reason = errno;
+
+        perror("collector history control");
+
+        return reason == EACCES || reason == EPERM ? 3 : 2;
+    }
+
+    if (access(database, F_OK) == -1) {
+        perror("history database");
+
+        return 2;
+    }
+
+    if (access(database, W_OK) == -1) {
+        fprintf(stderr, "Administrator permission is needed to delete this history.\n");
+
+        return 3;
+    }
+
+    /* Reserve the control endpoint so a collector cannot start mid-deletion. */
+    struct control_server *reservation = control_server_open(database, getuid());
+
+    if (reservation == NULL) {
+        const int reason = errno;
+
+        perror("history database reservation");
+
+        return reason == EACCES || reason == EPERM || reason == EEXIST ? 3 : 2;
+    }
+
+    char error[STORE_ERROR_LEN];
+    struct store *store = store_open(database, error);
+    int result = 2;
+
+    if (store == NULL) {
+        fprintf(stderr, "%s\n", error);
+    } else if (store_delete(store, identity == NULL ? NULL : &key) == -1) {
+        fprintf(stderr, "%s\n", store_error(store));
+    } else {
+        puts("Recorded traffic deleted.");
+        result = 0;
+    }
+
+    store_close(store);
+    control_server_close(reservation);
+
+    return result;
+}
+
 int main(int argc, char **argv) {
+    if (argc == 3 && strcmp(argv[1], "clear") == 0) {
+        return delete_history(argv[2], NULL);
+    }
+
+    if (argc == 4 && strcmp(argv[1], "delete") == 0) {
+        return delete_history(argv[2], argv[3]);
+    }
+
     if (argc == 4 && strcmp(argv[1], "backup") == 0) {
         return copy_database(argv[2], argv[3]);
     }

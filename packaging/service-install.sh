@@ -24,6 +24,8 @@ fi
 
 case "$action" in
     authorize) exit 0 ;;
+    clear) exec "$bundle/bin/pigeon-control" clear "$database" ;;
+    delete) exec "$bundle/bin/pigeon-control" delete "$database" "${5:-}" ;;
     off)
         systemctl disable "$unit"
         exit 0 ;;
@@ -48,6 +50,9 @@ printf '%s\n' "$database" > "$staging/PIGEON_DATABASE"
 printf '%s\n' "$installation" > "$staging/INSTALL_ROOT"
 chown -R root:root "$staging"
 chmod -R go-w "$staging"
+# mktemp creates a private directory; status checks need read-only metadata access.
+chmod 755 "$staging"
+chmod 644 "$staging/INSTALL_ROOT" "$staging/PIGEON_DATABASE"
 
 # Gracefully stop an existing foreground service or detached collector first.
 if [ -f "$base/PIGEON_DATABASE" ]; then

@@ -44,6 +44,8 @@ with tempfile.TemporaryDirectory(prefix='pigeon-boot-check-') as temporary:
     assert str(bundle / 'bin/pigeon-collector') not in text
     snapshot = lib / 'pigeon-1000/bin/pigeon-collector'
     assert snapshot.exists() and not snapshot.stat().st_mode & 0o022
+    assert (lib / 'pigeon-1000').stat().st_mode & 0o777 == 0o755
+    assert (lib / 'pigeon-1000/INSTALL_ROOT').stat().st_mode & 0o777 == 0o644
     assert 'enable --now pigeon-1000.service' in log.read_text()
     subprocess.run(args[:2] + ['off'] + args[3:], env=env, check=True)
     assert snapshot.exists() and 'disable pigeon-1000.service' in log.read_text()

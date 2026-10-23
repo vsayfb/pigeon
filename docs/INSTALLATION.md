@@ -78,7 +78,7 @@ Run **Release and publish Pigeon GUI** in the GUI repository when ready.
 Either workflow can create the Direct Upload Pages project `piigeon` on its
 first run. A `vX.Y.Z` tag matching the version in that repository's
 `CMakeLists.txt` also triggers release. Versions are independent: CLI currently
-`0.0.4`, GUI currently `0.0.3`.
+`0.0.5`, GUI currently `0.0.4`.
 
 ## How the shared deployment works
 
@@ -133,8 +133,8 @@ Build prerequisites: C compiler, CMake, Ninja, libpcap/SQLite/ncurses developmen
 files, Python 3.10+, and patchelf. Musl builds also need Linux kernel headers.
 
 ```sh
-python3 packaging/release.py build --version 0.0.4 --output dist
-python3 packaging/release.py site --version 0.0.4 --artifacts dist --output dist/upload
+python3 packaging/release.py build --version 0.0.5 --output dist
+python3 packaging/release.py site --version 0.0.5 --artifacts dist --output dist/upload
 PIGEON_INSTALL_ROOT=/tmp/pigeon-check/data PIGEON_BIN_DIR=/tmp/pigeon-check/bin \
   sh packaging/install.sh --from "$PWD/dist/upload"
 ```
@@ -203,3 +203,15 @@ the installation so future starts and the GUI use it automatically. Boot-startup
 preferences are preserved. A running boot service is reconfigured using administrator
 authorization; the GUI uses PolicyKit for that prompt. `PIGEON_DATABASE` remains an
 explicit override and must be unset before changing the saved location.
+
+## Delete recorded traffic
+
+The GUI offers **Delete conversation** in conversation details and **Clear all
+history** in Settings, with confirmation. Equivalent CLI commands are
+`pigeon history clear [database]` and `pigeon history delete <identity> [database]`.
+Clear-all deletes conversations and saved DNS associations. Live collectors
+also discard pre-deletion counters and pending attribution, so a later flush
+cannot restore deleted history. New traffic can create fresh conversations.
+Stopped databases are protected against a concurrent collector start while
+being edited. Administrator permission is requested only when necessary.
+This deletes application-visible records, not forensic secure erasure of disk pages.

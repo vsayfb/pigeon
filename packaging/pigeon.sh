@@ -73,6 +73,20 @@ case "${1:-}" in
     '')
         start
         exec "$bundle/bin/pigeon-tui" --db "$database" ;;
+    history)
+        shift
+        [ "$#" -ge 1 ] || fail 'usage: pigeon history clear [database] | delete identity [database]'
+        operation=$1
+        shift
+        case "$operation" in
+            clear)
+                [ "$#" -le 1 ] || fail 'usage: pigeon history clear [database]'
+                exec sh "$bundle/share/history.sh" "$bundle" "$data" "${1:-$database}" clear ;;
+            delete)
+                [ "$#" -ge 1 ] && [ "$#" -le 2 ] || fail 'usage: pigeon history delete identity [database]'
+                exec sh "$bundle/share/history.sh" "$bundle" "$data" "${2:-$database}" delete "$1" ;;
+            *) fail 'usage: pigeon history clear | delete identity' ;;
+        esac ;;
     database)
         [ "$#" -le 2 ] || fail 'usage: pigeon database [absolute-file-path]'
         if [ "$#" = 1 ]; then
@@ -121,6 +135,7 @@ case "${1:-}" in
             'pigeon start [interface]  Start background capture' \
             'pigeon stop               Stop capture and save pending traffic' \
             'pigeon restart [iface]    Restart background capture' \
+            'pigeon history clear|delete  Delete recorded traffic' \
             'pigeon database [path]    Show or change storage, preserving history' \
             'pigeon autostart on|off|status  Configure start at boot (default on)' \
             'pigeon uninstall          Remove CLI/TUI, keeping traffic history' \

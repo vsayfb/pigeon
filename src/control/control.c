@@ -158,7 +158,7 @@ void control_server_poll(struct control_server *server, control_handler handler,
 
     struct ucred credentials;
     socklen_t length = sizeof credentials;
-    char request[128] = "";
+    char request[1024] = "";
     size_t used = 0;
 
     const int authorized = getsockopt(client, SOL_SOCKET, SO_PEERCRED, &credentials, &length) == 0 &&
