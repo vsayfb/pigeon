@@ -32,12 +32,18 @@ struct store *store_open(const char *path, char error[STORE_ERROR_LEN]);
 /* Finalizes statements and closes the database. Accepts NULL. */
 void store_close(struct store *store);
 
+/* Live capture only: cap future observation times at the flush wall clock.
+ * Touched stored rows recover from clock rollback without losing counters.
+ * Offline replay retains min/max timestamp semantics by default. */
+void store_set_live_mode(struct store *store);
+
 /*
  * Adds count rows to cumulative totals in one transaction. Rows are borrowed
  * for the call and remain unchanged. NULL rows is valid only for count zero.
  * Counters must fit signed 64-bit integers, names must be NUL terminated,
  * and first_seen must not exceed last_seen. Existing names are preserved;
- * an unnamed row may acquire a name. Timestamps retain their minimum/maximum.
+ * an unnamed row may acquire a name. Timestamps retain their minimum/maximum
+ * unless live mode caps future timestamps at the current flush wall clock.
  * Replaying an already successful batch adds its counters again.
  *
  * Returns 0 on success. Returns -1 with store_error() set on failure; no

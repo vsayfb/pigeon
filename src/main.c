@@ -483,6 +483,10 @@ int main(const int argc, char **argv) {
             return 1;
         }
 
+        if (!offline) {
+            store_set_live_mode(context.store);
+        }
+
         context.flows = flow_create_addresses(context.locals, context.local_count, 4096, 10000);
 
         if (context.flows == NULL) {

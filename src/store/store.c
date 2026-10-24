@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 struct store {
     sqlite3 *db;
@@ -15,7 +16,13 @@ struct store {
 
     char error[STORE_ERROR_LEN];
     int unusable;
+    int live;
+    int64_t write_time;
 };
+
+void store_set_live_mode(struct store *store) {
+    store->live = 1;
+}
 
 static int fail(struct store *store, const char *operation) {
     snprintf(store->error, sizeof store->error, "%s: %s",
@@ -296,6 +303,12 @@ static int write_row(struct store *store, const struct store_row *row) {
         row->delta.bytes_out, row->delta.bytes_in
     };
 
+    if (row->delta.first_seen > row->delta.last_seen) {
+        snprintf(store->error, sizeof store->error, "first_seen exceeds last_seen");
+
+        return -1;
+    }
+
     if (memchr(row->remote_name, '\0', sizeof row->remote_name) == NULL) {
         snprintf(store->error, sizeof store->error, "remote name is not NUL terminated");
 
@@ -315,11 +328,13 @@ static int write_row(struct store *store, const struct store_row *row) {
     }
 
     if (rc == SQLITE_OK) {
-        rc = sqlite3_bind_int64(store->upsert, 9, row->delta.first_seen);
+        rc = sqlite3_bind_int64(store->upsert, 9,
+            row->delta.first_seen < store->write_time ? row->delta.first_seen : store->write_time);
     }
 
     if (rc == SQLITE_OK) {
-        rc = sqlite3_bind_int64(store->upsert, 10, row->delta.last_seen);
+        rc = sqlite3_bind_int64(store->upsert, 10,
+            row->delta.last_seen < store->write_time ? row->delta.last_seen : store->write_time);
     }
 
     if (rc == SQLITE_OK) {
@@ -329,6 +344,10 @@ static int write_row(struct store *store, const struct store_row *row) {
 
     if (rc == SQLITE_OK) {
         rc = sqlite3_bind_int(store->upsert, 13, row->quic);
+    }
+
+    if (rc == SQLITE_OK) {
+        rc = sqlite3_bind_int64(store->upsert, 14, store->write_time);
     }
 
     if (rc != SQLITE_OK || sqlite3_step(store->upsert) != SQLITE_DONE) {
@@ -355,6 +374,20 @@ int store_flush(struct store *store, const struct store_row *rows, size_t count)
         snprintf(store->error, sizeof store->error, "rows is NULL for a nonempty batch");
 
         return -1;
+    }
+
+    store->write_time = INT64_MAX;
+
+    if (store->live) {
+        const time_t now = time(NULL);
+
+        if (now == (time_t)-1) {
+            snprintf(store->error, sizeof store->error, "cannot read live flush clock");
+
+            return -1;
+        }
+
+        store->write_time = (int64_t)now;
     }
 
     if (execute(store, "BEGIN IMMEDIATE") == -1) {

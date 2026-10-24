@@ -662,8 +662,9 @@ int flow_tick(struct flow *flow, int64_t now) {
     flow->name_time = now;
     flow->clock_set = 1;
 
-    if (flow->tick_started && now <= flow->last_tick) {
-        return now < flow->last_tick ? pending_drain(flow, now, 0) : 0;
+    /* A backward wall-clock adjustment starts a new throttle interval. */
+    if (flow->tick_started && now == flow->last_tick) {
+        return 0;
     }
 
     flow->tick_started = 1;

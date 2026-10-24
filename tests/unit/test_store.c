@@ -1,6 +1,7 @@
 #include <sqlite3.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 #include "../t.h"
@@ -586,7 +587,55 @@ static void test_version_six_esp_migration(void) {
     CHECK(unlink(path) == 0);
 }
 
+static void test_live_clock_recovery(void) {
+    struct store *store = open_memory();
+    struct store_row row = make_row(443);
+    struct store_row untouched = make_row(80);
+    struct store_row found;
+    const int64_t before = (int64_t)time(NULL);
+
+    row.delta.first_seen = before + 18000;
+    row.delta.last_seen = before + 18010;
+    untouched.delta = row.delta;
+
+    /* An offline store preserves future timestamps and out-of-order history. */
+    CHECK(store_flush(store, &row, 1) == 0);
+    CHECK(store_flush(store, &untouched, 1) == 0);
+    CHECK(store_lookup(store, &row.key, &found) == 1);
+    CHECK(found.delta.last_seen == before + 18010);
+
+    store_set_live_mode(store);
+
+    /* Simulate an existing flow carrying its pre-adjustment timestamp range. */
+    row.delta.first_seen = before;
+    CHECK(store_flush(store, &row, 1) == 0);
+    CHECK(store_lookup(store, &row.key, &found) == 1);
+    CHECK(found.delta.first_seen == before);
+    CHECK(found.delta.last_seen >= before);
+    CHECK(found.delta.last_seen <= (int64_t)time(NULL));
+    CHECK(found.delta.packets_out == 6);
+    CHECK(found.delta.bytes_in == 400);
+
+    /* Do not rewrite unrelated historical records or lose their counters. */
+    CHECK(store_lookup(store, &untouched.key, &found) == 1);
+    CHECK(found.delta.last_seen == before + 18010);
+    CHECK(found.delta.packets_out == 3);
+
+    /* New future-dated live rows also maintain a valid timestamp range. */
+    row.key.remote_port = 8443;
+    row.delta.first_seen = before + 18000;
+    CHECK(store_flush(store, &row, 1) == 0);
+    CHECK(store_lookup(store, &row.key, &found) == 1);
+    CHECK(found.delta.first_seen <= found.delta.last_seen);
+    CHECK(found.delta.last_seen <= (int64_t)time(NULL));
+
+    row.delta.first_seen = row.delta.last_seen + 1;
+    CHECK(store_flush(store, &row, 1) == -1);
+    store_close(store);
+}
+
 int main(void) {
+    test_live_clock_recovery();
     test_totals_and_timestamps();
     test_names_and_independent_keys();
     test_failed_batch_rolls_back_and_can_retry();

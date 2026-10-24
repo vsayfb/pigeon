@@ -189,7 +189,7 @@
     " bytes_out=conversations.bytes_out+excluded.bytes_out," \
     " bytes_in=conversations.bytes_in+excluded.bytes_in," \
     " first_seen=min(conversations.first_seen,excluded.first_seen)," \
-    " last_seen=max(conversations.last_seen,excluded.last_seen)," \
+    " last_seen=max(min(conversations.last_seen,?14),excluded.last_seen)," \
     " remote_name=coalesce(conversations.remote_name,excluded.remote_name)," \
     " quic=max(conversations.quic,excluded.quic);"
 

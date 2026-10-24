@@ -68,7 +68,6 @@ static void test_throttle_and_shutdown_flush(void) {
     observe(flow, 443, 0, 100);
 
     CHECK(flow_tick(flow, 100) == 0);
-    CHECK(flow_tick(flow, 99) == 0);
     CHECK(store_lookup(store, &key, &row) == 1);
     CHECK(row.delta.packets_out == 1);
     CHECK(flow_entry_delta(flow_find(flow, &key))->packets_out == 1);
@@ -87,6 +86,39 @@ static void test_throttle_and_shutdown_flush(void) {
     CHECK(row.delta.packets_out == 3);
     CHECK(row.delta.bytes_out == 30);
     CHECK(row.delta.last_seen == 101);
+
+    flow_destroy(flow);
+    store_close(store);
+}
+
+static void test_clock_rollback_resumes_flushes(void) {
+    struct store *store = open_memory();
+    struct flow *flow = flow_create(LOCAL_IP, 4, 8);
+    const struct flow_key key = key_for(443, IP_PROTO_TCP);
+    struct store_row row;
+
+    CHECK(flow != NULL);
+    flow_set_store(flow, store);
+    observe(flow, 443, 0, 20000);
+    CHECK(flow_tick(flow, 20000) == 0);
+
+    observe(flow, 443, 0, 100);
+    CHECK(flow_tick(flow, 100) == 0);
+    CHECK(store_lookup(store, &key, &row) == 1);
+    CHECK(row.delta.packets_out == 2);
+
+    observe(flow, 443, 0, 100);
+    CHECK(flow_tick(flow, 100) == 0);
+    CHECK(store_lookup(store, &key, &row) == 1);
+    CHECK(row.delta.packets_out == 2);
+    CHECK(flow_tick(flow, 101) == 0);
+    CHECK(store_lookup(store, &key, &row) == 1);
+    CHECK(row.delta.packets_out == 3);
+    CHECK(row.delta.bytes_out == 30);
+
+    /* Replay stores still retain the timestamp range of the original data. */
+    CHECK(row.delta.first_seen == 100);
+    CHECK(row.delta.last_seen == 20000);
 
     flow_destroy(flow);
     store_close(store);
@@ -219,6 +251,7 @@ static void test_failed_writes_preserve_entries_and_retry(void) {
 
 int main(void) {
     test_throttle_and_shutdown_flush();
+    test_clock_rollback_resumes_flushes();
     test_expiry_boundaries();
     test_eviction_flushes_dirty_only();
     test_failed_writes_preserve_entries_and_retry();

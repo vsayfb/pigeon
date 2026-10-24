@@ -50,6 +50,11 @@ writes to `pigeon.db` in the current directory; select a different path with
 
 Pending deltas flush in one transaction at most once per second during periodic
 maintenance. UDP and ICMP conversations expire after 30 idle seconds and TCP after 120.
+If the system clock moves backward, periodic writes resume in the new clock
+interval rather than waiting for the old time. Live writes cap future timestamps
+on updated conversations at the current flush time, preserving their counters;
+unrelated historical rows are left unchanged. Offline replay retains the original
+minimum/maximum capture timestamps.
 Capacity eviction writes the oldest conversation before freeing it. Shutdown
 forces a final flush, including on SIGINT and SIGTERM. Forced shutdown and
 capacity flushes bypass the periodic throttle. Successful writes clear only

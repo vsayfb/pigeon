@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.18)
-project(pigeon VERSION 0.0.5 LANGUAGES C)
+project(pigeon VERSION 0.0.6 LANGUAGES C)
 
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
